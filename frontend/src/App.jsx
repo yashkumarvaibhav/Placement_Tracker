@@ -154,7 +154,7 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
     });
   };
 
-  const hydrateOfferFromCompany = (idx, companyId) => {
+  const hydrateOfferFromCompany = (idx, companyId, force = false) => {
     const company = companies.find((c) => String(c.id) === String(companyId));
     if (!company) {
       updateOfferField(idx, 'company_id', companyId);
@@ -164,7 +164,7 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
     setForm((prev) => {
       const nextOffers = [...(prev.offers || [])];
       const existing = nextOffers[idx] || {};
-      const sameCompany = String(existing.company_id) === String(companyId);
+      const sameCompany = !force && String(existing.company_id) === String(companyId);
       const pick = (val, fallback) => (val === '' || val === null || val === undefined ? fallback : val);
 
       nextOffers[idx] = sameCompany
@@ -276,6 +276,11 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
                         <option key={c.id} value={c.id}>{c.name}</option>
                       ))}
                     </select>
+                    {offer.company_id && (
+                      <div className="flex-row" style={{ marginTop: 6, justifyContent: 'flex-end' }}>
+                        <button type="button" className="secondary" onClick={() => hydrateOfferFromCompany(idx, offer.company_id, true)}>Reapply company data</button>
+                      </div>
+                    )}
                   </div>
                   <div>
                     <label>Offer Type</label>
