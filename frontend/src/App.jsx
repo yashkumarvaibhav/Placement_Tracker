@@ -161,14 +161,24 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
     <form
       onSubmit={(e) => {
         e.preventDefault();
+
+        const normalizedOffers = (form.offers || []).map((o) => ({
+          ...o,
+          company_id: o.company_id ? Number(o.company_id) : null,
+          ctc: o.ctc ? Number(o.ctc) : null,
+          stipend: o.stipend ? Number(o.stipend) : null,
+        }));
+
+        const isPlaced = form.placement_status === 'Placed';
         onSubmit({
           ...form,
-          offers: (form.offers || []).map((o) => ({
-            ...o,
-            company_id: o.company_id ? Number(o.company_id) : null,
-            ctc: o.ctc ? Number(o.ctc) : null,
-            stipend: o.stipend ? Number(o.stipend) : null,
-          })),
+          offers: isPlaced ? normalizedOffers : [],
+          company_id: isPlaced ? form.company_id : null,
+          offer_type: isPlaced ? form.offer_type : null,
+          ctc: isPlaced ? form.ctc : null,
+          stipend: isPlaced ? form.stipend : null,
+          registration_deadline: isPlaced ? form.registration_deadline : null,
+          offer_date: isPlaced ? form.offer_date : null,
         });
       }}
     >
@@ -197,8 +207,19 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
             value={form.placement_status}
             onChange={(e) => {
               handleChange(e);
-              if (e.target.value === 'Unplaced') setForm((prev) => ({ ...prev, offers: [] }));
-              else if (!form.offers?.length) addOffer();
+              if (e.target.value === 'Unplaced') {
+                // Clear any existing offers/primary company details when marking unplaced
+                setForm((prev) => ({
+                  ...prev,
+                  offers: [],
+                  company_id: null,
+                  offer_type: '',
+                  ctc: '',
+                  stipend: '',
+                  registration_deadline: '',
+                  offer_date: '',
+                }));
+              } else if (!form.offers?.length) addOffer();
             }}
           >
             <option>Placed</option>

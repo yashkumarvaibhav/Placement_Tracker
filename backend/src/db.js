@@ -285,11 +285,13 @@ const replaceOffers = async (studentId, offers = []) => {
 };
 
 export const createStudent = async (payload) => {
-  const primaryCompany = payload.offers?.[0]?.company_id || payload.company_id || null;
-  const primaryOfferType = payload.offers?.[0]?.offer_type || payload.offer_type || null;
+  const isPlaced = payload.placement_status === 'Placed';
+  const primaryCompany = isPlaced ? (payload.offers?.[0]?.company_id || payload.company_id || null) : null;
+  const primaryOfferType = isPlaced ? (payload.offers?.[0]?.offer_type || payload.offer_type || null) : null;
   const result = await run(
     `INSERT INTO students (roll_number, name, program, placement_status, company_id, offer_type, ctc, stipend, registration_deadline, offer_date)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ,
     [
       payload.roll_number,
       payload.name,
@@ -297,21 +299,22 @@ export const createStudent = async (payload) => {
       payload.placement_status,
       primaryCompany,
       primaryOfferType,
-      payload.ctc ?? null,
-      payload.stipend ?? null,
-      payload.registration_deadline || null,
-      payload.offer_date || null,
+      isPlaced ? payload.ctc ?? null : null,
+      isPlaced ? payload.stipend ?? null : null,
+      isPlaced ? payload.registration_deadline || null : null,
+      isPlaced ? payload.offer_date || null : null,
     ]
   );
 
   const studentId = result.lastID;
-  if (payload.offers?.length) await replaceOffers(studentId, payload.offers);
+  if (isPlaced && payload.offers?.length) await replaceOffers(studentId, payload.offers);
   return getStudent(studentId);
 };
 
 export const updateStudent = async (id, payload) => {
-  const primaryCompany = payload.offers?.[0]?.company_id || payload.company_id || null;
-  const primaryOfferType = payload.offers?.[0]?.offer_type || payload.offer_type || null;
+  const isPlaced = payload.placement_status === 'Placed';
+  const primaryCompany = isPlaced ? (payload.offers?.[0]?.company_id || payload.company_id || null) : null;
+  const primaryOfferType = isPlaced ? (payload.offers?.[0]?.offer_type || payload.offer_type || null) : null;
   await run(
     `UPDATE students SET roll_number=?, name=?, program=?, placement_status=?, company_id=?, offer_type=?, ctc=?, stipend=?, registration_deadline=?, offer_date=?
      WHERE id=?`,
@@ -322,18 +325,18 @@ export const updateStudent = async (id, payload) => {
       payload.placement_status,
       primaryCompany,
       primaryOfferType,
-      payload.ctc ?? null,
-      payload.stipend ?? null,
-      payload.registration_deadline || null,
-      payload.offer_date || null,
+      isPlaced ? payload.ctc ?? null : null,
+      isPlaced ? payload.stipend ?? null : null,
+      isPlaced ? payload.registration_deadline || null : null,
+      isPlaced ? payload.offer_date || null : null,
       id,
     ]
   );
 
-  if (payload.offers) await replaceOffers(id, payload.offers);
+  const offerPayload = isPlaced ? (payload.offers || []) : [];
+  await replaceOffers(id, offerPayload);
   return getStudent(id);
 };
-
 export const deleteStudent = (id) => run('DELETE FROM students WHERE id=?', [id]);
 
 export const buildStats = async () => {
