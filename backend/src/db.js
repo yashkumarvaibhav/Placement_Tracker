@@ -71,6 +71,43 @@ export const initDb = async () => {
       offer_date TEXT,
       FOREIGN KEY(company_id) REFERENCES companies(id)
     );`);
+
+  await run(`CREATE TABLE IF NOT EXISTS offers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      student_id INTEGER NOT NULL,
+      company_id INTEGER NOT NULL,
+      offer_type TEXT,
+      ctc REAL,
+      stipend REAL,
+      registration_deadline TEXT,
+      offer_date TEXT,
+      FOREIGN KEY(student_id) REFERENCES students(id),
+      FOREIGN KEY(company_id) REFERENCES companies(id)
+    );`);
+};
+
+const backfillOffers = async () => {
+  const rows = await all(
+    `SELECT s.id as student_id, s.company_id, s.offer_type, s.ctc, s.stipend, s.registration_deadline, s.offer_date
+     FROM students s
+     WHERE s.company_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM offers o WHERE o.student_id = s.id)`
+  );
+
+  for (const row of rows) {
+    await run(
+      `INSERT INTO offers (student_id, company_id, offer_type, ctc, stipend, registration_deadline, offer_date)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        row.student_id,
+        row.company_id,
+        row.offer_type || null,
+        row.ctc ?? null,
+        row.stipend ?? null,
+        row.registration_deadline || null,
+        row.offer_date || null,
+      ]
+    );
+  }
 };
 
 const parseCsvRow = (row) => {
@@ -113,12 +150,36 @@ export const seedFromCsv = async (csvPath) => {
   }
 
   for (const row of rows) {
-    const companyId = await insertCompanyIfMissing(row.company);
-    await run(
+    const companyNames = row.company
+      ? row.company
+          .split(/[,/]| and /i)
+          .map((c) => c.trim())
+          .filter(Boolean)
+      : [];
+
+    const offerCompanyIds = [];
+    for (const name of companyNames) {
+      const cid = await insertCompanyIfMissing(name);
+      if (cid) offerCompanyIds.push(cid);
+    }
+
+    const primaryCompanyId = offerCompanyIds[0] || null;
+
+    const studentResult = await run(
       `INSERT OR IGNORE INTO students (roll_number, name, program, placement_status, company_id, offer_type)
        VALUES (?, ?, ?, ?, ?, ?)` ,
-      [row.roll, row.name, row.program, row.status, companyId, companyId ? 'FTE' : null]
+      [row.roll, row.name, row.program, row.status, primaryCompanyId, primaryCompanyId ? 'FTE' : null]
     );
+
+    const studentId = studentResult.lastID;
+    if (studentId && offerCompanyIds.length) {
+      for (const cid of offerCompanyIds) {
+        await run(
+          `INSERT INTO offers (student_id, company_id, offer_type) VALUES (?, ?, ?)`,
+          [studentId, cid, 'FTE']
+        );
+      }
+    }
   }
 };
 
@@ -166,24 +227,66 @@ export const updateCompany = async (id, payload) => {
 
 export const deleteCompany = (id) => run('DELETE FROM companies WHERE id=?', [id]);
 
-export const listStudents = () =>
-  all(
+const fetchStudentWithCompanies = async (where = '', params = []) => {
+  const students = await all(
     `SELECT s.*, c.name as company_name, c.category as company_category, c.type as company_type, c.ctc as company_ctc, c.stipend as company_stipend
      FROM students s
      LEFT JOIN companies c ON s.company_id = c.id
-     ORDER BY s.roll_number ASC`
+     ${where}
+     ORDER BY s.roll_number ASC`,
+    params
   );
 
-export const getStudent = (id) =>
-  get(
-    `SELECT s.*, c.name as company_name, c.category as company_category, c.type as company_type, c.ctc as company_ctc, c.stipend as company_stipend
-     FROM students s
-     LEFT JOIN companies c ON s.company_id = c.id
-     WHERE s.id = ?`,
-    [id]
+  const studentIds = students.map((s) => s.id);
+  if (!studentIds.length) return students.map((s) => ({ ...s, offers: [] }));
+
+  const offers = await all(
+    `SELECT o.*, co.name as company_name, co.category as company_category, co.type as company_type, co.ctc as company_ctc, co.stipend as company_stipend
+     FROM offers o
+     JOIN companies co ON o.company_id = co.id
+     WHERE o.student_id IN (${studentIds.map(() => '?').join(',')})`,
+    studentIds
   );
+
+  const offersByStudent = offers.reduce((acc, offer) => {
+    acc[offer.student_id] = acc[offer.student_id] || [];
+    acc[offer.student_id].push(offer);
+    return acc;
+  }, {});
+
+  return students.map((s) => ({ ...s, offers: offersByStudent[s.id] || [] }));
+};
+
+export const listStudents = () => fetchStudentWithCompanies();
+
+export const getStudent = async (id) => {
+  const students = await fetchStudentWithCompanies('WHERE s.id = ?', [id]);
+  return students[0];
+};
+
+const replaceOffers = async (studentId, offers = []) => {
+  await run('DELETE FROM offers WHERE student_id = ?', [studentId]);
+  for (const offer of offers) {
+    if (!offer.company_id) continue;
+    await run(
+      `INSERT INTO offers (student_id, company_id, offer_type, ctc, stipend, registration_deadline, offer_date)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        studentId,
+        offer.company_id,
+        offer.offer_type || null,
+        offer.ctc ?? null,
+        offer.stipend ?? null,
+        offer.registration_deadline || null,
+        offer.offer_date || null,
+      ]
+    );
+  }
+};
 
 export const createStudent = async (payload) => {
+  const primaryCompany = payload.offers?.[0]?.company_id || payload.company_id || null;
+  const primaryOfferType = payload.offers?.[0]?.offer_type || payload.offer_type || null;
   const result = await run(
     `INSERT INTO students (roll_number, name, program, placement_status, company_id, offer_type, ctc, stipend, registration_deadline, offer_date)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -192,18 +295,23 @@ export const createStudent = async (payload) => {
       payload.name,
       normalizeProgram(payload.program),
       payload.placement_status,
-      payload.company_id || null,
-      payload.offer_type || null,
+      primaryCompany,
+      primaryOfferType,
       payload.ctc ?? null,
       payload.stipend ?? null,
       payload.registration_deadline || null,
       payload.offer_date || null,
     ]
   );
-  return getStudent(result.lastID);
+
+  const studentId = result.lastID;
+  if (payload.offers?.length) await replaceOffers(studentId, payload.offers);
+  return getStudent(studentId);
 };
 
 export const updateStudent = async (id, payload) => {
+  const primaryCompany = payload.offers?.[0]?.company_id || payload.company_id || null;
+  const primaryOfferType = payload.offers?.[0]?.offer_type || payload.offer_type || null;
   await run(
     `UPDATE students SET roll_number=?, name=?, program=?, placement_status=?, company_id=?, offer_type=?, ctc=?, stipend=?, registration_deadline=?, offer_date=?
      WHERE id=?`,
@@ -212,8 +320,8 @@ export const updateStudent = async (id, payload) => {
       payload.name,
       normalizeProgram(payload.program),
       payload.placement_status,
-      payload.company_id || null,
-      payload.offer_type || null,
+      primaryCompany,
+      primaryOfferType,
       payload.ctc ?? null,
       payload.stipend ?? null,
       payload.registration_deadline || null,
@@ -221,6 +329,8 @@ export const updateStudent = async (id, payload) => {
       id,
     ]
   );
+
+  if (payload.offers) await replaceOffers(id, payload.offers);
   return getStudent(id);
 };
 
@@ -230,14 +340,19 @@ export const buildStats = async () => {
   const companies = await listCompanies();
   const students = await listStudents();
 
-  const offers = students.filter((s) => s.placement_status === 'Placed');
-  const internOffers = offers.filter((s) => (s.offer_type || '').includes('Intern') && s.offer_type !== 'Intern+FTE');
-  const fteOffers = offers.filter((s) => s.offer_type === 'FTE');
-  const comboOffers = offers.filter((s) => s.offer_type === 'Intern+FTE');
+  const offers = await all(
+    `SELECT o.*, c.category as company_category, c.type as company_type, c.ctc as company_ctc, c.stipend as company_stipend
+     FROM offers o
+     JOIN companies c ON o.company_id = c.id`
+  );
+
+  const internOffers = offers.filter((o) => (o.offer_type || '').includes('Intern') && o.offer_type !== 'Intern+FTE');
+  const fteOffers = offers.filter((o) => o.offer_type === 'FTE');
+  const comboOffers = offers.filter((o) => o.offer_type === 'Intern+FTE');
 
   const byCategory = { Aplus: 0, A: 0, B: 0 };
-  for (const s of offers) {
-    const cat = s.company_category;
+  for (const o of offers) {
+    const cat = o.company_category;
     if (!cat) continue;
     if (cat.toUpperCase() === 'A+') byCategory.Aplus += 1;
     else if (cat.toUpperCase() === 'A') byCategory.A += 1;
@@ -245,10 +360,10 @@ export const buildStats = async () => {
   }
 
   const ctcValues = offers
-    .map((s) => s.ctc ?? s.company_ctc)
+    .map((o) => o.ctc ?? o.company_ctc)
     .filter((v) => typeof v === 'number');
   const stipendValues = offers
-    .map((s) => s.stipend ?? s.company_stipend)
+    .map((o) => o.stipend ?? o.company_stipend)
     .filter((v) => typeof v === 'number');
 
   const median = (arr) => {
@@ -260,14 +375,15 @@ export const buildStats = async () => {
 
   const average = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
 
-  const totalStudents = students.length || 1; // avoid divide by zero
+  const totalStudents = students.length || 1;
+  const placedStudentIds = new Set(offers.map((o) => o.student_id));
+  const placedCount = placedStudentIds.size;
   const fteCount = fteOffers.length + comboOffers.length;
   const internCount = internOffers.length + comboOffers.length;
-  const placedCount = offers.length;
 
   return {
     number_of_companies: companies.length,
-    total_offers: placedCount,
+    total_offers: offers.length,
     total_intern_offers: internOffers.length,
     total_fte_offers: fteCount,
     total_combo_offers: comboOffers.length,
@@ -290,3 +406,4 @@ export const buildStats = async () => {
 
 export const adminToken = ADMIN_TOKEN;
 export const closeDb = () => db.close();
+export const ensureOfferBackfill = backfillOffers;
