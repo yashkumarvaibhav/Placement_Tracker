@@ -239,6 +239,8 @@ form {
   width: 100%;
   padding: 18px;
   box-shadow: var(--shadow);
+  max-height: 90vh;
+  overflow-y: auto;
 }
 
 @media (max-width: 700px) {
