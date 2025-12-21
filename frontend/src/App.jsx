@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { Link, Route, Routes, useNavigate } from 'react-router-dom';
 
@@ -339,6 +339,7 @@ const App = () => {
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const isInitialLoad = useRef(true);
 
   const [showCompanyModal, setShowCompanyModal] = useState(false);
   const [editCompany, setEditCompany] = useState(null);
@@ -346,7 +347,8 @@ const App = () => {
   const [editStudent, setEditStudent] = useState(null);
 
   const refresh = async () => {
-    setLoading(true);
+    const initial = isInitialLoad.current;
+    if (initial) setLoading(true);
     try {
       const [statsRes, companyRes, studentRes] = await Promise.all([
         api.get('/stats'),
@@ -356,10 +358,11 @@ const App = () => {
       setStats(statsRes.data);
       setCompanies(companyRes.data);
       setStudents(studentRes.data);
+      if (initial) isInitialLoad.current = false;
     } catch (err) {
       setError(err.message);
     } finally {
-      setLoading(false);
+      if (initial) setLoading(false);
     }
   };
 
