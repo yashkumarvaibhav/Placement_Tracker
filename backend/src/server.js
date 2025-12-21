@@ -8,6 +8,7 @@ import {
   createStudent,
   deleteCompany,
   deleteStudent,
+  ensureOfferBackfill,
   getCompany,
   getStudent,
   initDb,
@@ -94,9 +95,12 @@ app.get('/api/students/:id', async (req, res) => {
 app.post('/api/students', authMiddleware, async (req, res) => {
   try {
     if (req.body.placement_status === 'Placed') {
-      if (!req.body.company_id) return res.status(400).json({ message: 'Company is required for placed students' });
-      const existsCompany = await getCompany(req.body.company_id);
-      if (!existsCompany) return res.status(400).json({ message: 'Company does not exist' });
+      const offers = req.body.offers || (req.body.company_id ? [{ company_id: req.body.company_id }] : []);
+      if (!offers.length) return res.status(400).json({ message: 'At least one company offer is required for placed students' });
+      for (const offer of offers) {
+        const existsCompany = await getCompany(offer.company_id);
+        if (!existsCompany) return res.status(400).json({ message: `Company does not exist (id: ${offer.company_id})` });
+      }
     }
     const created = await createStudent(req.body);
     res.status(201).json(created);
@@ -110,9 +114,12 @@ app.put('/api/students/:id', authMiddleware, async (req, res) => {
     const exists = await getStudent(req.params.id);
     if (!exists) return res.status(404).json({ message: 'Student not found' });
     if (req.body.placement_status === 'Placed') {
-      if (!req.body.company_id) return res.status(400).json({ message: 'Company is required for placed students' });
-      const existsCompany = await getCompany(req.body.company_id);
-      if (!existsCompany) return res.status(400).json({ message: 'Company does not exist' });
+      const offers = req.body.offers || (req.body.company_id ? [{ company_id: req.body.company_id }] : []);
+      if (!offers.length) return res.status(400).json({ message: 'At least one company offer is required for placed students' });
+      for (const offer of offers) {
+        const existsCompany = await getCompany(offer.company_id);
+        if (!existsCompany) return res.status(400).json({ message: `Company does not exist (id: ${offer.company_id})` });
+      }
     }
     const updated = await updateStudent(req.params.id, req.body);
     res.json(updated);
@@ -142,6 +149,13 @@ const start = async () => {
     await seedFromCsv(csvPath);
   } catch (err) {
     console.error('CSV seed skipped:', err.message);
+  }
+
+  // Backfill offers for legacy rows seeded before offers table existed
+  try {
+    await ensureOfferBackfill();
+  } catch (err) {
+    console.error('Offer backfill skipped:', err.message);
   }
 
   app.listen(PORT, () => {

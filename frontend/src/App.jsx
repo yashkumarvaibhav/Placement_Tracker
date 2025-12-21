@@ -117,17 +117,25 @@ const CompanyForm = ({ initial = {}, onSubmit, onCancel }) => {
 };
 
 const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
+  const initialOffers = initial.offers?.length
+    ? initial.offers
+    : initial.company_id
+      ? [{
+          company_id: initial.company_id,
+          offer_type: initial.offer_type || '',
+          ctc: initial.ctc ?? '',
+          stipend: initial.stipend ?? '',
+          registration_deadline: initial.registration_deadline || '',
+          offer_date: initial.offer_date || '',
+        }]
+      : [];
+
   const [form, setForm] = useState({
     roll_number: '',
     name: '',
     program: 'CSE',
     placement_status: 'Unplaced',
-    company_id: '',
-    offer_type: '',
-    ctc: '',
-    stipend: '',
-    registration_deadline: '',
-    offer_date: '',
+    offers: initialOffers,
     ...initial,
   });
 
@@ -138,15 +146,29 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
 
   const placed = form.placement_status === 'Placed';
 
+  const updateOfferField = (idx, key, value) => {
+    setForm((prev) => {
+      const nextOffers = [...(prev.offers || [])];
+      nextOffers[idx] = { ...nextOffers[idx], [key]: value };
+      return { ...prev, offers: nextOffers };
+    });
+  };
+
+  const addOffer = () => setForm((prev) => ({ ...prev, offers: [...(prev.offers || []), { company_id: '', offer_type: '', ctc: '', stipend: '', registration_deadline: '', offer_date: '' }] }));
+  const removeOffer = (idx) => setForm((prev) => ({ ...prev, offers: (prev.offers || []).filter((_, i) => i !== idx) }));
+
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
         onSubmit({
           ...form,
-          company_id: form.company_id ? Number(form.company_id) : null,
-          ctc: form.ctc ? Number(form.ctc) : null,
-          stipend: form.stipend ? Number(form.stipend) : null,
+          offers: (form.offers || []).map((o) => ({
+            ...o,
+            company_id: o.company_id ? Number(o.company_id) : null,
+            ctc: o.ctc ? Number(o.ctc) : null,
+            stipend: o.stipend ? Number(o.stipend) : null,
+          })),
         });
       }}
     >
@@ -170,48 +192,68 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
         </div>
         <div>
           <label>Placement Status</label>
-          <select name="placement_status" value={form.placement_status} onChange={handleChange}>
+          <select
+            name="placement_status"
+            value={form.placement_status}
+            onChange={(e) => {
+              handleChange(e);
+              if (e.target.value === 'Unplaced') setForm((prev) => ({ ...prev, offers: [] }));
+              else if (!form.offers?.length) addOffer();
+            }}
+          >
             <option>Placed</option>
             <option>Unplaced</option>
           </select>
         </div>
         {placed && (
-          <>
-            <div>
-              <label>Company</label>
-              <select name="company_id" value={form.company_id || ''} onChange={handleChange}>
-                <option value="">Select</option>
-                {companies.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label>Offer Type</label>
-              <select name="offer_type" value={form.offer_type || ''} onChange={handleChange}>
-                <option value="">Select</option>
-                <option>Intern</option>
-                <option>FTE</option>
-                <option>Intern+FTE</option>
-              </select>
-            </div>
-            <div>
-              <label>CTC (LPA)</label>
-              <input name="ctc" type="number" step="0.1" value={form.ctc ?? ''} onChange={handleChange} />
-            </div>
-            <div>
-              <label>Stipend</label>
-              <input name="stipend" type="number" step="0.1" value={form.stipend ?? ''} onChange={handleChange} />
-            </div>
-            <div>
-              <label>Last Date of Registration</label>
-              <input name="registration_deadline" type="date" value={form.registration_deadline || ''} onChange={handleChange} />
-            </div>
-            <div>
-              <label>Date of Offer</label>
-              <input name="offer_date" type="date" value={form.offer_date || ''} onChange={handleChange} />
-            </div>
-          </>
+          <div className="grid" style={{ gridTemplateColumns: '1fr' }}>
+            {(form.offers || []).map((offer, idx) => (
+              <div key={idx} className="card" style={{ margin: 0, borderStyle: 'dashed' }}>
+                <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px,1fr))' }}>
+                  <div>
+                    <label>Company</label>
+                    <select value={offer.company_id || ''} onChange={(e) => updateOfferField(idx, 'company_id', e.target.value)}>
+                      <option value="">Select</option>
+                      {companies.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label>Offer Type</label>
+                    <select value={offer.offer_type || ''} onChange={(e) => updateOfferField(idx, 'offer_type', e.target.value)}>
+                      <option value="">Select</option>
+                      <option>Intern</option>
+                      <option>FTE</option>
+                      <option>Intern+FTE</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>CTC (LPA)</label>
+                    <input type="number" step="0.1" value={offer.ctc ?? ''} onChange={(e) => updateOfferField(idx, 'ctc', e.target.value)} />
+                  </div>
+                  <div>
+                    <label>Stipend</label>
+                    <input type="number" step="0.1" value={offer.stipend ?? ''} onChange={(e) => updateOfferField(idx, 'stipend', e.target.value)} />
+                  </div>
+                  <div>
+                    <label>Last Date of Registration</label>
+                    <input type="date" value={offer.registration_deadline || ''} onChange={(e) => updateOfferField(idx, 'registration_deadline', e.target.value)} />
+                  </div>
+                  <div>
+                    <label>Date of Offer</label>
+                    <input type="date" value={offer.offer_date || ''} onChange={(e) => updateOfferField(idx, 'offer_date', e.target.value)} />
+                  </div>
+                </div>
+                {form.offers.length > 1 && (
+                  <div className="flex-row" style={{ justifyContent: 'flex-end', marginTop: 8 }}>
+                    <button type="button" className="secondary" onClick={() => removeOffer(idx)}>Remove</button>
+                  </div>
+                )}
+              </div>
+            ))}
+            <button type="button" className="secondary" onClick={addOffer}>Add Another Offer</button>
+          </div>
         )}
       </div>
       <div className="flex-row" style={{ justifyContent: 'flex-end', marginTop: 8 }}>
@@ -451,8 +493,8 @@ const App = () => {
                       <th>Name</th>
                       <th>Program</th>
                       <th>Status</th>
-                      <th>Company</th>
-                      <th>Offer Type</th>
+                      <th>Companies</th>
+                      <th>Offer Types</th>
                       <th>CTC</th>
                       <th>Stipend</th>
                       <th></th>
@@ -465,10 +507,10 @@ const App = () => {
                         <td>{s.name}</td>
                         <td>{s.program}</td>
                         <td><span className="chip">{s.placement_status}</span></td>
-                        <td>{s.company_name || '—'}</td>
-                        <td>{s.offer_type || '—'}</td>
-                        <td>{s.ctc ?? s.company_ctc ?? '—'}</td>
-                        <td>{s.stipend ?? s.company_stipend ?? '—'}</td>
+                        <td>{(s.offers?.length ? s.offers.map((o) => o.company_name).join(', ') : s.company_name) || '—'}</td>
+                        <td>{(s.offers?.length ? s.offers.map((o) => o.offer_type || '—').join(', ') : s.offer_type) || '—'}</td>
+                        <td>{s.offers?.length ? (s.offers.map((o) => o.ctc ?? o.company_ctc).filter(Boolean).join(', ') || '—') : (s.ctc ?? s.company_ctc ?? '—')}</td>
+                        <td>{s.offers?.length ? (s.offers.map((o) => o.stipend ?? o.company_stipend).filter(Boolean).join(', ') || '—') : (s.stipend ?? s.company_stipend ?? '—')}</td>
                         <td>
                           {isAdmin && (
                             <div className="flex-row">
