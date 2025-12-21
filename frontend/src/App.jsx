@@ -154,6 +154,32 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
     });
   };
 
+  const hydrateOfferFromCompany = (idx, companyId) => {
+    const company = companies.find((c) => String(c.id) === String(companyId));
+    if (!company) {
+      updateOfferField(idx, 'company_id', companyId);
+      return;
+    }
+
+    setForm((prev) => {
+      const nextOffers = [...(prev.offers || [])];
+      const existing = nextOffers[idx] || {};
+      const pick = (val, fallback) => (val === '' || val === null || val === undefined ? fallback : val);
+
+      nextOffers[idx] = {
+        ...existing,
+        company_id: companyId,
+        offer_type: pick(existing.offer_type, company.type || ''),
+        ctc: pick(existing.ctc, company.ctc ?? ''),
+        stipend: pick(existing.stipend, company.stipend ?? ''),
+        registration_deadline: pick(existing.registration_deadline, company.registration_deadline || ''),
+        offer_date: pick(existing.offer_date, company.offer_date || ''),
+      };
+
+      return { ...prev, offers: nextOffers };
+    });
+  };
+
   const addOffer = () => setForm((prev) => ({ ...prev, offers: [...(prev.offers || []), { company_id: '', offer_type: '', ctc: '', stipend: '', registration_deadline: '', offer_date: '' }] }));
   const removeOffer = (idx) => setForm((prev) => ({ ...prev, offers: (prev.offers || []).filter((_, i) => i !== idx) }));
 
@@ -233,7 +259,7 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
                 <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px,1fr))' }}>
                   <div>
                     <label>Company</label>
-                    <select value={offer.company_id || ''} onChange={(e) => updateOfferField(idx, 'company_id', e.target.value)}>
+                    <select value={offer.company_id || ''} onChange={(e) => hydrateOfferFromCompany(idx, e.target.value)}>
                       <option value="">Select</option>
                       {companies.map((c) => (
                         <option key={c.id} value={c.id}>{c.name}</option>
