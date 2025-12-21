@@ -164,17 +164,28 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
     setForm((prev) => {
       const nextOffers = [...(prev.offers || [])];
       const existing = nextOffers[idx] || {};
+      const sameCompany = String(existing.company_id) === String(companyId);
       const pick = (val, fallback) => (val === '' || val === null || val === undefined ? fallback : val);
 
-      nextOffers[idx] = {
-        ...existing,
-        company_id: companyId,
-        offer_type: pick(existing.offer_type, company.type || ''),
-        ctc: pick(existing.ctc, company.ctc ?? ''),
-        stipend: pick(existing.stipend, company.stipend ?? ''),
-        registration_deadline: pick(existing.registration_deadline, company.registration_deadline || ''),
-        offer_date: pick(existing.offer_date, company.offer_date || ''),
-      };
+      nextOffers[idx] = sameCompany
+        ? {
+            ...existing,
+            company_id: companyId,
+            offer_type: pick(existing.offer_type, company.type || ''),
+            ctc: pick(existing.ctc, company.ctc ?? ''),
+            stipend: pick(existing.stipend, company.stipend ?? ''),
+            registration_deadline: pick(existing.registration_deadline, company.registration_deadline || ''),
+            offer_date: pick(existing.offer_date, company.offer_date || ''),
+          }
+        : {
+            ...existing,
+            company_id: companyId,
+            offer_type: company.type || '',
+            ctc: company.ctc ?? '',
+            stipend: company.stipend ?? '',
+            registration_deadline: company.registration_deadline || '',
+            offer_date: company.offer_date || '',
+          };
 
       return { ...prev, offers: nextOffers };
     });
