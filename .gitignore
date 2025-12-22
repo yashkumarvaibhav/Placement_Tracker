@@ -2,3 +2,4 @@ node_modules
 backend/data.sqlite
 backend/.env
 frontend/dist
+*.sqlite
