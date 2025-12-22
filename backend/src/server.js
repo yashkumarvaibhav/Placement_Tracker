@@ -9,6 +9,7 @@ import {
   deleteCompany,
   deleteStudent,
   ensureOfferBackfill,
+  getTableCounts,
   getCompany,
   getStudent,
   initDb,
@@ -135,6 +136,15 @@ app.delete('/api/students/:id', authMiddleware, async (req, res) => {
 app.get('/api/stats', async (_req, res) => {
   const stats = await buildStats();
   res.json(stats);
+});
+
+app.get('/api/health', async (_req, res) => {
+  try {
+    const counts = await getTableCounts();
+    res.json({ status: 'ok', db: { host: process.env.PGHOST, database: process.env.PGDATABASE }, counts });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
 });
 
 app.get('/', (_req, res) => {
