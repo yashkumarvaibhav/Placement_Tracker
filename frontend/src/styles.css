@@ -47,6 +47,13 @@ header {
   margin: 0 auto;
 }
 
+.nav-logo img {
+  display: block;
+  max-height: 80px;
+  width: auto;
+  max-width: 220px;
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -272,6 +279,7 @@ form {
     padding: 18px;
   }
   .hero h1 { font-size: 26px; }
+  .nav-logo img { max-height: 64px; max-width: 180px; }
 }
 
 @media (max-width: 640px) {
@@ -281,4 +289,5 @@ form {
   .table th, .table td { font-size: 12px; }
   .flex-row { flex-wrap: wrap; }
   .card { overflow-x: auto; }
+  .nav-logo img { max-height: 56px; max-width: 150px; }
 }
