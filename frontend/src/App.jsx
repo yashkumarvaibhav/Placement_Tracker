@@ -455,7 +455,7 @@ const App = () => {
           <div className="flex-row" style={{ alignItems: 'center', height: 96 }}>
             <img src={`${assetBase}iiitd_logo.png`} alt="IIIT Delhi logo" style={{ height: '100%', width: 'auto', maxHeight: 96, objectFit: 'contain' }} />
           </div>
-          <div className="flex-row" style={{ alignItems: 'center', gap: 16 }}>
+          <div className="flex-row nav-links" style={{ alignItems: 'center', gap: 16 }}>
             <Link to="/">Dashboard</Link>
             <Link to="/companies">Companies</Link>
             <Link to="/students">Students</Link>

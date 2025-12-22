@@ -157,6 +157,7 @@ form {
   width: 100%;
   border-collapse: collapse;
   color: var(--text);
+  min-width: 640px;
 }
 
 .table th, .table td {
@@ -246,4 +247,38 @@ form {
   .container { padding: 16px; }
   .hero { grid-template-columns: 1fr; }
   .table th, .table td { font-size: 13px; }
+}
+
+@media (max-width: 900px) {
+  .navbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .nav-links {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .nav-links a,
+  .nav-links button {
+    padding: 8px 12px;
+  }
+  .container { padding: 18px; }
+  .card { padding: 16px; }
+  .hero {
+    grid-template-columns: 1fr;
+    text-align: left;
+    padding: 18px;
+  }
+  .hero h1 { font-size: 26px; }
+}
+
+@media (max-width: 640px) {
+  .hero { padding: 16px; }
+  .stat-value { font-size: 22px; }
+  .stat-label { font-size: 12px; }
+  .table th, .table td { font-size: 12px; }
+  .flex-row { flex-wrap: wrap; }
+  .card { overflow-x: auto; }
 }
