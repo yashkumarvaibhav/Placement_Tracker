@@ -3,6 +3,7 @@ import axios from 'axios';
 import { Link, Route, Routes, useNavigate } from 'react-router-dom';
 
 const api = axios.create({ baseURL: import.meta.env.VITE_API_BASE || '/api' });
+const assetBase = import.meta.env.BASE_URL || '/';
 
 const StatCard = ({ label, value }) => (
   <div className="card">
@@ -348,6 +349,24 @@ const App = () => {
 
   const formatPct = (val) => (val === null || val === undefined || Number.isNaN(Number(val)) ? '—' : `${val}%`);
 
+  const formatDate = (val) => {
+    if (!val) return '—';
+    const date = new Date(val);
+    if (Number.isNaN(date.getTime())) return '—';
+    const day = date.getDate();
+    const suffix = (d) => {
+      if (d >= 11 && d <= 13) return 'th';
+      const last = d % 10;
+      if (last === 1) return 'st';
+      if (last === 2) return 'nd';
+      if (last === 3) return 'rd';
+      return 'th';
+    };
+    const month = date.toLocaleString('en-US', { month: 'long' });
+    const year = date.getFullYear();
+    return `${day}${suffix(day)} ${month}, ${year}`;
+  };
+
   const [showCompanyModal, setShowCompanyModal] = useState(false);
   const [editCompany, setEditCompany] = useState(null);
   const [showStudentModal, setShowStudentModal] = useState(false);
@@ -432,19 +451,18 @@ const App = () => {
   return (
     <>
       <header>
-        <div className="navbar">
-          <div className="brand">
-            <span className="badge">M.Tech 2025-26</span>
-            <span>M.Tech Placement Data - IIIT Delhi</span>
+        <div className="navbar" style={{ padding: '16px 24px', gap: 20 }}>
+          <div className="flex-row" style={{ alignItems: 'center', height: 96 }}>
+            <img src={`${assetBase}iiitd_logo.png`} alt="IIIT Delhi logo" style={{ height: '100%', width: 'auto', maxHeight: 96, objectFit: 'contain' }} />
           </div>
-          <div className="flex-row">
+          <div className="flex-row" style={{ alignItems: 'center', gap: 16 }}>
             <Link to="/">Dashboard</Link>
-            <Link to="/companies" style={{ marginLeft: 12 }}>Companies</Link>
-            <Link to="/students" style={{ marginLeft: 12 }}>Students</Link>
+            <Link to="/companies">Companies</Link>
+            <Link to="/students">Students</Link>
             {isAdmin ? (
-              <button className="secondary" style={{ marginLeft: 12 }} onClick={() => { setToken(''); localStorage.removeItem('adminToken'); navigate('/'); }}>Logout</button>
+              <button className="secondary" onClick={() => { setToken(''); localStorage.removeItem('adminToken'); navigate('/'); }}>Logout</button>
             ) : (
-              <Link to="/admin" style={{ marginLeft: 12 }}>Admin Login</Link>
+              <Link to="/admin">Admin Login</Link>
             )}
           </div>
         </div>
@@ -458,19 +476,16 @@ const App = () => {
               <div
                 className="hero"
                 style={{
-                  backgroundImage: 'linear-gradient(90deg, rgba(63,173,168,0.3), rgba(255,255,255,0.85)), url(/institute18-3.jpg)',
+                  backgroundImage: `linear-gradient(90deg, rgba(63,173,168,0.3), rgba(255,255,255,0.85)), url(${assetBase}institute18-3.jpg)`,
                   backgroundSize: 'cover',
                   backgroundPosition: 'center',
                   gridTemplateColumns: '1.5fr 1fr',
                 }}
               >
-                  <div className="flex-row" style={{ gap: 18, alignItems: 'center' }}>
-                    <img src="/iiitd_logo.png" alt="IIIT Delhi logo" style={{ width: 280, height: 280, objectFit: 'contain' }} />
-                    <div>
-                      <div className="badge" style={{ display: 'inline-block', marginBottom: 10 }}>Unofficial Dashboard</div>
-                      <h1 style={{ margin: '4px 0 6px' }}>M.Tech Placement Data for Batch passing out in 2026</h1>
-                      {error && <p style={{ color: '#dc2626' }}>{error}</p>}
-                    </div>
+                <div>
+                  <div className="badge" style={{ display: 'inline-block', marginBottom: 10 }}>Unofficial Dashboard</div>
+                  <h1 style={{ margin: '4px 0 6px' }}>M.Tech Placement Data for Batch passing out in 2026</h1>
+                  {error && <p style={{ color: '#dc2626' }}>{error}</p>}
                 </div>
                 <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px,1fr))', alignItems: 'stretch' }}>
                   <div className="card" style={{ textAlign: 'center', background: 'rgba(255,255,255,0.9)' }}>
@@ -601,18 +616,29 @@ const App = () => {
                       <th>Category</th>
                       <th>CTC</th>
                       <th>Stipend</th>
+                      <th>Date of Offer</th>
                       <th></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {companies.map((c) => (
-                      <tr key={c.id}>
+                    {companies.map((c) => {
+                      const cat = (c.category || '').toUpperCase();
+                      const rowStyle = cat === 'A+'
+                        ? { backgroundColor: '#ecfeff' }
+                        : cat === 'A'
+                          ? { backgroundColor: '#fefce8' }
+                          : cat === 'B'
+                            ? { backgroundColor: '#fef2f2' }
+                            : {};
+                      return (
+                      <tr key={c.id} style={rowStyle}>
                         <td>{c.name}</td>
                         <td>{c.role}</td>
                         <td><span className="chip">{c.type || '—'}</span></td>
                         <td>{c.category || '—'}</td>
                         <td>{c.ctc ?? '—'}</td>
                         <td>{c.stipend ?? '—'}</td>
+                        <td>{formatDate(c.offer_date)}</td>
                         <td>
                           {isAdmin && (
                             <div className="flex-row">
@@ -622,7 +648,8 @@ const App = () => {
                           )}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -661,12 +688,19 @@ const App = () => {
                       <th>Offer Types</th>
                       <th>CTC</th>
                       <th>Stipend</th>
+                      <th>Date of Offer</th>
                       <th></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {students.map((s) => (
-                      <tr key={s.id}>
+                    {students.map((s) => {
+                      const isPlaced = s.placement_status === 'Placed';
+                      const rowStyle = isPlaced ? { backgroundColor: '#f0fdf4' } : { backgroundColor: '#fef2f2' };
+                      const offerDates = s.offers?.length
+                        ? (s.offers.map((o) => formatDate(o.offer_date || o.company_offer_date)).filter((x) => x !== '—').join(', ') || '—')
+                        : formatDate(s.offer_date ?? s.company_offer_date);
+                      return (
+                      <tr key={s.id} style={rowStyle}>
                         <td>{s.roll_number}</td>
                         <td>{s.name}</td>
                         <td>{s.program}</td>
@@ -675,6 +709,7 @@ const App = () => {
                         <td>{(s.offers?.length ? s.offers.map((o) => o.offer_type || '—').join(', ') : s.offer_type) || '—'}</td>
                         <td>{s.offers?.length ? (s.offers.map((o) => o.ctc ?? o.company_ctc).filter(Boolean).join(', ') || '—') : (s.ctc ?? s.company_ctc ?? '—')}</td>
                         <td>{s.offers?.length ? (s.offers.map((o) => o.stipend ?? o.company_stipend).filter(Boolean).join(', ') || '—') : (s.stipend ?? s.company_stipend ?? '—')}</td>
+                        <td>{offerDates}</td>
                         <td>
                           {isAdmin && (
                             <div className="flex-row">
@@ -684,7 +719,8 @@ const App = () => {
                           )}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

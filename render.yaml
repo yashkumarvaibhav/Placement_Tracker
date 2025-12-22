@@ -2,7 +2,7 @@ services:
   - type: web
     name: placement-tracker-api
     env: node
-    plan: starter
+    plan: free
     region: oregon
     branch: main
     rootDir: backend
