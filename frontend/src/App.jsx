@@ -452,8 +452,8 @@ const App = () => {
     <>
       <header>
         <div className="navbar" style={{ padding: '16px 24px', gap: 20 }}>
-          <div className="flex-row" style={{ alignItems: 'center', height: 96 }}>
-            <img src={`${assetBase}iiitd_logo.png`} alt="IIIT Delhi logo" style={{ height: '100%', width: 'auto', maxHeight: 96, objectFit: 'contain' }} />
+          <div className="flex-row nav-logo" style={{ alignItems: 'center' }}>
+            <img src={`${assetBase}iiitd_logo.png`} alt="IIIT Delhi logo" />
           </div>
           <div className="flex-row nav-links" style={{ alignItems: 'center', gap: 16 }}>
             <Link to="/">Dashboard</Link>
