@@ -18,8 +18,8 @@ import {
   updateStudent,
 } from './db.js';
 
-const ADMIN_EMAIL = 'yash25091@iiitd.ac.in';
-const ADMIN_PASSWORD = 'GraduateAlgo@1198';
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'yash25091@iiitd.ac.in';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'GraduateAlgo@1198';
 const PORT = process.env.PORT || 4000;
 
 const app = express();
