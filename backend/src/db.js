@@ -353,21 +353,12 @@ export const buildStats = async () => {
   const fteOffers = offers.filter((o) => o.offer_type === 'FTE');
   const comboOffers = offers.filter((o) => o.offer_type === 'Intern+FTE');
 
-  const byCategory = { Aplus: 0, A: 0, B: 0 };
-  for (const o of offers) {
-    const cat = o.company_category;
-    if (!cat) continue;
-    if (cat.toUpperCase() === 'A+') byCategory.Aplus += 1;
-    else if (cat.toUpperCase() === 'A') byCategory.A += 1;
-    else if (cat.toUpperCase() === 'B') byCategory.B += 1;
-  }
+  const studentProgramMap = students.reduce((acc, s) => {
+    acc[s.id] = s.program;
+    return acc;
+  }, {});
 
-  const ctcValues = offers
-    .map((o) => o.ctc ?? o.company_ctc)
-    .filter((v) => typeof v === 'number');
-  const stipendValues = offers
-    .map((o) => o.stipend ?? o.company_stipend)
-    .filter((v) => typeof v === 'number');
+  const offersWithProgram = offers.map((o) => ({ ...o, program: studentProgramMap[o.student_id] }));
 
   const median = (arr) => {
     if (!arr.length) return null;
@@ -378,47 +369,91 @@ export const buildStats = async () => {
 
   const average = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
 
-  const totalStudents = students.length;
-  const placedCount = students.filter((s) => s.placement_status === 'Placed').length;
-  const fteCount = fteOffers.length + comboOffers.length;
-  const internCount = internOffers.length + comboOffers.length;
-
   const toPct = (num, den) => (den ? Number(((num / den) * 100).toFixed(2)) : 0);
 
-  const summarize = (subset) => {
+  const summarize = (subset, programs = null) => {
     const total = subset.length;
     const placed = subset.filter((s) => s.placement_status === 'Placed').length;
+    const programSet = programs ? new Set(programs) : null;
+    const offersSubset = programSet
+      ? offersWithProgram.filter((o) => programSet.has(o.program))
+      : offersWithProgram;
+
+    const internSub = offersSubset.filter((o) => (o.offer_type || '').includes('Intern') && o.offer_type !== 'Intern+FTE');
+    const fteSub = offersSubset.filter((o) => o.offer_type === 'FTE');
+    const comboSub = offersSubset.filter((o) => o.offer_type === 'Intern+FTE');
+
+    const byCategory = { Aplus: 0, A: 0, B: 0 };
+    for (const o of offersSubset) {
+      const cat = o.company_category;
+      if (!cat) continue;
+      if (cat.toUpperCase() === 'A+') byCategory.Aplus += 1;
+      else if (cat.toUpperCase() === 'A') byCategory.A += 1;
+      else if (cat.toUpperCase() === 'B') byCategory.B += 1;
+    }
+
+    const ctcValues = offersSubset
+      .map((o) => o.ctc ?? o.company_ctc)
+      .filter((v) => typeof v === 'number');
+    const stipendValues = offersSubset
+      .map((o) => o.stipend ?? o.company_stipend)
+      .filter((v) => typeof v === 'number');
+
+    const internCount = internSub.length + comboSub.length;
+    const fteCount = fteSub.length + comboSub.length;
+
     return {
       total_students: total,
       placed_students: placed,
+      total_offers: offersSubset.length,
+      total_intern_offers: internSub.length,
+      total_fte_offers: fteSub.length + comboSub.length,
+      total_combo_offers: comboSub.length,
+      total_Aplus_offers: byCategory.Aplus,
+      total_A_offers: byCategory.A,
+      total_B_offers: byCategory.B,
+      highest_ctc: ctcValues.length ? Math.max(...ctcValues) : null,
+      average_ctc: average(ctcValues),
+      median_ctc: median(ctcValues),
+      highest_stipend: stipendValues.length ? Math.max(...stipendValues) : null,
+      average_stipend: average(stipendValues),
+      median_stipend: median(stipendValues),
       placement_percentage: toPct(placed, total),
+      internship_percentage: toPct(internCount, total),
+      fte_percentage: toPct(fteCount, total),
     };
   };
 
+  const totalStudents = students.length;
   const branchSummary = {
     overall: summarize(students),
-    cse: summarize(students.filter((s) => s.program === 'CSE' || s.program === 'CSE-R')),
-    ece: summarize(students.filter((s) => s.program === 'ECE')),
-    cb: summarize(students.filter((s) => s.program === 'CB')),
+    cse: summarize(students.filter((s) => s.program === 'CSE' || s.program === 'CSE-R'), ['CSE', 'CSE-R']),
+    ece: summarize(students.filter((s) => s.program === 'ECE'), ['ECE']),
+    cb: summarize(students.filter((s) => s.program === 'CB'), ['CB']),
   };
+
+  const overall = branchSummary.overall;
+  const placedCount = overall.placed_students;
+  const fteCount = overall.total_fte_offers;
+  const internCount = overall.total_intern_offers;
 
   return {
     number_of_companies: companies.length,
-    total_offers: offers.length,
-    total_intern_offers: internOffers.length,
-    total_fte_offers: fteCount,
-    total_combo_offers: comboOffers.length,
-    total_Aplus_offers: byCategory.Aplus,
-    total_A_offers: byCategory.A,
-    total_B_offers: byCategory.B,
-    highest_ctc: ctcValues.length ? Math.max(...ctcValues) : null,
-    lowest_ctc: ctcValues.length ? Math.min(...ctcValues) : null,
-    average_ctc: average(ctcValues),
-    median_ctc: median(ctcValues),
-    highest_stipend: stipendValues.length ? Math.max(...stipendValues) : null,
-    lowest_stipend: stipendValues.length ? Math.min(...stipendValues) : null,
-    average_stipend: average(stipendValues),
-    median_stipend: median(stipendValues),
+    total_offers: overall.total_offers,
+    total_intern_offers: overall.total_intern_offers,
+    total_fte_offers: overall.total_fte_offers,
+    total_combo_offers: overall.total_combo_offers,
+    total_Aplus_offers: overall.total_Aplus_offers,
+    total_A_offers: overall.total_A_offers,
+    total_B_offers: overall.total_B_offers,
+    highest_ctc: overall.highest_ctc,
+    lowest_ctc: null,
+    average_ctc: overall.average_ctc,
+    median_ctc: overall.median_ctc,
+    highest_stipend: overall.highest_stipend,
+    lowest_stipend: null,
+    average_stipend: overall.average_stipend,
+    median_stipend: overall.median_stipend,
     fte_percentage: toPct(fteCount, totalStudents),
     internship_percentage: toPct(internCount, totalStudents),
     overall_placement_percentage: toPct(placedCount, totalStudents),
