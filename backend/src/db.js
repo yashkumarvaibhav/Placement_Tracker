@@ -4,7 +4,20 @@ import sqlite3 from 'sqlite3';
 import { parse } from 'csv-parse';
 
 const DB_PATH = path.join(process.cwd(), 'data.sqlite');
+const SEED_PATH = process.env.SQLITE_SEED_PATH || path.join(process.cwd(), 'seed.sqlite');
 const ADMIN_TOKEN = 'admin-static-token';
+
+const ensureSeedDb = () => {
+  if (fs.existsSync(DB_PATH)) return;
+  if (fs.existsSync(SEED_PATH)) {
+    fs.copyFileSync(SEED_PATH, DB_PATH);
+    console.log(`Database seeded from ${SEED_PATH}`);
+  } else {
+    console.warn('No existing database found and no seed file present; starting with empty DB');
+  }
+};
+
+ensureSeedDb();
 
 sqlite3.verbose();
 const db = new sqlite3.Database(DB_PATH);
