@@ -4,11 +4,14 @@ const ADMIN_TOKEN = 'admin-static-token';
 
 const pool = new Pool({
   host: process.env.PGHOST,
+  // If Render cannot reach Supabase over IPv6, set PGHOSTADDR to the IPv4 address of your Supabase host.
+  hostaddr: process.env.PGHOSTADDR,
   port: Number(process.env.PGPORT || 5432),
   database: process.env.PGDATABASE,
   user: process.env.PGUSER,
   password: process.env.PGPASSWORD,
   ssl: process.env.PGSSLMODE === 'disable' ? false : { rejectUnauthorized: false },
+  connectionTimeoutMillis: Number(process.env.PGCONNECT_TIMEOUT || 10000),
 });
 
 const query = async (text, params = []) => {
