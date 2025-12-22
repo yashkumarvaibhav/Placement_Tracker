@@ -1,9 +1,21 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { Link, Route, Routes, useNavigate } from 'react-router-dom';
+import { GoogleLogin } from '@react-oauth/google';
 
 const api = axios.create({ baseURL: import.meta.env.VITE_API_BASE || '/api' });
 const assetBase = import.meta.env.BASE_URL || '/';
+
+const parseJwt = (token) => {
+  try {
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(atob(base64).split('').map((c) => `%${(`00${c.charCodeAt(0).toString(16)}`).slice(-2)}`).join(''));
+    return JSON.parse(jsonPayload);
+  } catch (err) {
+    return null;
+  }
+};
 
 const StatCard = ({ label, value }) => (
   <div className="card">
@@ -333,6 +345,7 @@ const useAdminHeaders = (token) => useMemo(() => ({ headers: { Authorization: `B
 const App = () => {
   const navigate = useNavigate();
   const [token, setToken] = useState(localStorage.getItem('adminToken') || '');
+  const [googleEmail, setGoogleEmail] = useState(localStorage.getItem('googleEmail') || '');
   const authHeaders = useAdminHeaders(token);
 
   const [stats, setStats] = useState({});
@@ -340,7 +353,9 @@ const App = () => {
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [loginError, setLoginError] = useState('');
   const isInitialLoad = useRef(true);
+  const isGoogleAuthed = !!googleEmail;
 
   const formatInr = (val, period = 'p.a.') => {
     if (val === null || val === undefined || Number.isNaN(Number(val))) return '—';
@@ -365,6 +380,31 @@ const App = () => {
     const month = date.toLocaleString('en-US', { month: 'long' });
     const year = date.getFullYear();
     return `${day}${suffix(day)} ${month}, ${year}`;
+  };
+
+  const handleGoogleSuccess = (credentialResponse) => {
+    const tokenId = credentialResponse?.credential;
+    const payload = tokenId ? parseJwt(tokenId) : null;
+    const email = payload?.email;
+    if (!email || !email.toLowerCase().endsWith('@iiitd.ac.in')) {
+      setLoginError('Only iiitd.ac.in email accounts are allowed.');
+      return;
+    }
+    setLoginError('');
+    setGoogleEmail(email);
+    localStorage.setItem('googleEmail', email);
+    refresh();
+  };
+
+  const handleGoogleError = () => {
+    setLoginError('Google sign-in failed. Please try again.');
+  };
+
+  const handleGoogleLogout = () => {
+    setGoogleEmail('');
+    localStorage.removeItem('googleEmail');
+    setToken('');
+    localStorage.removeItem('adminToken');
   };
 
   const [showCompanyModal, setShowCompanyModal] = useState(false);
@@ -393,8 +433,9 @@ const App = () => {
   };
 
   useEffect(() => {
-    refresh();
-  }, []);
+    if (isGoogleAuthed) refresh();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isGoogleAuthed]);
 
   const handleLogin = async (email, password) => {
     try {
@@ -446,6 +487,17 @@ const App = () => {
     refresh();
   };
 
+  if (!isGoogleAuthed) {
+    return (
+      <LoginScreen
+        assetBase={assetBase}
+        onSuccess={handleGoogleSuccess}
+        onError={handleGoogleError}
+        error={loginError}
+      />
+    );
+  }
+
   if (loading) return <div className="container">Loading...</div>;
 
   return (
@@ -459,6 +511,8 @@ const App = () => {
             <Link to="/">Dashboard</Link>
             <Link to="/companies">Companies</Link>
             <Link to="/students">Students</Link>
+            {googleEmail && <span className="subtext">{googleEmail}</span>}
+            <button className="secondary" onClick={handleGoogleLogout}>Sign out</button>
             {isAdmin ? (
               <button className="secondary" onClick={() => { setToken(''); localStorage.removeItem('adminToken'); navigate('/'); }}>Logout</button>
             ) : (
@@ -755,6 +809,33 @@ const App = () => {
     </>
   );
 };
+
+const LoginScreen = ({ assetBase, onSuccess, onError, error }) => (
+  <div
+    className="login-screen"
+    style={{
+      minHeight: '100vh',
+      display: 'grid',
+      placeItems: 'center',
+      background: `linear-gradient(90deg, rgba(63,173,168,0.35), rgba(255,255,255,0.9)), url(${assetBase}institute18-3.jpg)`,
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+      padding: 24,
+    }}
+  >
+    <div className="card" style={{ maxWidth: 420, width: '100%', textAlign: 'center' }}>
+      <div style={{ marginBottom: 16 }}>
+        <img src={`${assetBase}iiitd_logo.png`} alt="IIIT Delhi" style={{ maxHeight: 72, width: 'auto' }} />
+      </div>
+      <h2 style={{ margin: '4px 0 8px' }}>Placement Tracker</h2>
+      <p className="subtext" style={{ marginBottom: 16 }}>Sign in with your iiitd.ac.in email to continue.</p>
+      {error && <div style={{ color: '#dc2626', marginBottom: 12 }}>{error}</div>}
+      <div style={{ display: 'grid', placeItems: 'center' }}>
+        <GoogleLogin onSuccess={onSuccess} onError={onError} useOneTap={false} />
+      </div>
+    </div>
+  </div>
+);
 
 const LoginForm = ({ onLogin }) => {
   const [email, setEmail] = useState('');
