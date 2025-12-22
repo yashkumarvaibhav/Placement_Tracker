@@ -1,15 +1,15 @@
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
 
 :root {
-  --bg: #0f172a;
-  --panel: #111827;
-  --accent: #06b6d4;
-  --accent-2: #f59e0b;
-  --text: #e5e7eb;
-  --muted: #94a3b8;
-  --border: rgba(255, 255, 255, 0.08);
-  --shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
-  --radius: 18px;
+  --bg: #f7f7f7;
+  --panel: #ffffff;
+  --accent: #3fada8;
+  --accent-2: #808080;
+  --text: #333333;
+  --muted: #666666;
+  --border: rgba(0, 0, 0, 0.08);
+  --shadow: 0 16px 40px rgba(0, 0, 0, 0.12);
+  --radius: 16px;
 }
 
 * {
@@ -18,10 +18,8 @@
 
 body {
   margin: 0;
-  font-family: 'Space Grotesk', system-ui, sans-serif;
-  background: radial-gradient(circle at 20% 20%, rgba(6, 182, 212, 0.08), transparent 25%),
-    radial-gradient(circle at 80% 0%, rgba(245, 158, 11, 0.08), transparent 25%),
-    var(--bg);
+  font-family: 'Segoe UI', 'Geneva', 'Space Grotesk', system-ui, sans-serif;
+  background: var(--bg);
   color: var(--text);
   min-height: 100vh;
 }
@@ -32,12 +30,12 @@ a {
 }
 
 header {
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
   z-index: 10;
-  background: rgba(15, 23, 42, 0.8);
+  background: rgba(255, 255, 255, 0.85);
 }
 
 .navbar {
@@ -60,8 +58,8 @@ header {
 .badge {
   padding: 6px 12px;
   border-radius: 999px;
-  background: rgba(6, 182, 212, 0.16);
-  color: #67e8f9;
+  background: rgba(63, 173, 168, 0.16);
+  color: #1f6f6b;
   font-size: 12px;
   border: 1px solid var(--border);
 }
@@ -100,18 +98,18 @@ header {
 
 button {
   cursor: pointer;
-  background: linear-gradient(120deg, var(--accent), #22d3ee);
-  color: #0b1220;
+  background: linear-gradient(120deg, var(--accent), #1d8f89);
+  color: #ffffff;
   border: none;
   padding: 10px 16px;
   border-radius: 12px;
   font-weight: 700;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
-  box-shadow: 0 10px 25px rgba(6, 182, 212, 0.2);
+  box-shadow: 0 10px 25px rgba(63, 173, 168, 0.25);
 }
 
 button.secondary {
-  background: rgba(255, 255, 255, 0.06);
+  background: #f2f2f2;
   color: var(--text);
   border: 1px solid var(--border);
   box-shadow: none;
@@ -124,23 +122,23 @@ button:active {
 input, select, textarea {
   width: 100%;
   padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.05);
+  background: #ffffff;
   border: 1px solid var(--border);
   border-radius: 12px;
   color: var(--text);
   font-size: 14px;
   appearance: none;
+  box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.02);
 }
 
 select {
-  background-color: #0d1426;
+  background-color: #ffffff;
   color: var(--text);
-  border-color: rgba(255, 255, 255, 0.12);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  border-color: rgba(0, 0, 0, 0.08);
 }
 
 select option {
-  background-color: #0b1120;
+  background-color: #ffffff;
   color: var(--text);
 }
 
@@ -168,7 +166,7 @@ form {
 }
 
 .table tr:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(63, 173, 168, 0.08);
 }
 
 .chip {
@@ -181,12 +179,12 @@ form {
 
 .hero {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   align-items: center;
   gap: 28px;
   padding: 24px;
   margin: 12px 0 20px;
-  background: linear-gradient(135deg, rgba(6, 182, 212, 0.1), rgba(15, 23, 42, 0.9));
+  background: linear-gradient(135deg, rgba(63, 173, 168, 0.15), rgba(255, 255, 255, 0.9));
   border: 1px solid var(--border);
   border-radius: 20px;
   box-shadow: var(--shadow);
