@@ -14,7 +14,6 @@ import {
   initDb,
   listCompanies,
   listStudents,
-  seedFromCsv,
   updateCompany,
   updateStudent,
 } from './db.js';
@@ -144,13 +143,6 @@ app.get('/', (_req, res) => {
 
 const start = async () => {
   await initDb();
-  const csvPath = path.join(process.cwd(), '..', 'IIIT Delhi _ M.Tech Placements 2025-26 - 2025-26.csv');
-  try {
-    await seedFromCsv(csvPath);
-  } catch (err) {
-    console.error('CSV seed skipped:', err.message);
-  }
-
   // Backfill offers for legacy rows seeded before offers table existed
   try {
     await ensureOfferBackfill();
