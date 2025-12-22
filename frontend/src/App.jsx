@@ -757,8 +757,8 @@ const App = () => {
 };
 
 const LoginForm = ({ onLogin }) => {
-  const [email, setEmail] = useState('yash25091@iiitd.ac.in');
-  const [password, setPassword] = useState('GraduateAlgo@1198');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
 
   return (
     <form
