@@ -3,3 +3,4 @@ backend/data.sqlite
 backend/.env
 frontend/dist
 *.sqlite
+!backend/seed.sqlite
