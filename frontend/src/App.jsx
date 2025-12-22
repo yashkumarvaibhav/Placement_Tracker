@@ -455,16 +455,25 @@ const App = () => {
           path="/"
           element={(
             <div className="container">
-              <div className="hero">
+              <div className="hero" style={{ gridTemplateColumns: '2fr 1fr' }}>
                 <div>
-                  <h1>Placement Intelligence for IIIT Delhi</h1>
-                  <p className="subtext">Live dashboard combining company and student data. Guests can browse; admins can manage everything.</p>
+                  <h1>M.Tech Placement Data of IIIT Delhi</h1>
+                  <p className="subtext">Batch passing out in 2026</p>
                   {error && <p style={{ color: '#f87171' }}>{error}</p>}
                 </div>
-                <div className="grid grid-3">
-                  <StatCard label="Companies" value={stats.number_of_companies} />
-                  <StatCard label="Total Offers" value={stats.total_offers} />
-                  <StatCard label="Placement %" value={`${stats.overall_placement_percentage || 0}%`} />
+                <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px,1fr))', alignItems: 'stretch' }}>
+                  <div className="card" style={{ textAlign: 'center' }}>
+                    <div className="stat-label">Total Companies</div>
+                    <div className="stat-value" style={{ fontSize: 30 }}>{stats.number_of_companies ?? '—'}</div>
+                  </div>
+                  <div className="card" style={{ textAlign: 'center' }}>
+                    <div className="stat-label">Total Offers</div>
+                    <div className="stat-value" style={{ fontSize: 30 }}>{stats.total_offers ?? '—'}</div>
+                  </div>
+                  <div className="card" style={{ textAlign: 'center' }}>
+                    <div className="stat-label">Placement %</div>
+                    <div className="stat-value" style={{ fontSize: 30 }}>{formatPct(stats.overall_placement_percentage)}</div>
+                  </div>
                 </div>
               </div>
 
@@ -472,39 +481,49 @@ const App = () => {
                 <h3>Key Metrics</h3>
                 <Link to="/admin" className="subtext">Admin actions</Link>
               </div>
-              <div className="grid grid-3">
-                <StatCard label="Intern Offers" value={stats.total_intern_offers} />
-                <StatCard label="FTE Offers" value={stats.total_fte_offers} />
-                <StatCard label="Intern+FTE" value={stats.total_combo_offers} />
-                <StatCard label="A+ Offers" value={stats.total_Aplus_offers} />
-                <StatCard label="A Offers" value={stats.total_A_offers} />
-                <StatCard label="B Offers" value={stats.total_B_offers} />
-                <StatCard label="Highest CTC" value={formatInr(stats.highest_ctc, 'p.a.')} />
-                <StatCard label="Average CTC" value={formatInr(stats.average_ctc, 'p.a.')} />
-                <StatCard label="Median CTC" value={formatInr(stats.median_ctc, 'p.a.')} />
-                <StatCard label="Highest Stipend" value={formatInr(stats.highest_stipend, 'p.m.')} />
-                <StatCard label="Average Stipend" value={formatInr(stats.average_stipend, 'p.m.')} />
-                <StatCard label="Internship %" value={`${stats.internship_percentage || 0}%`} />
-              </div>
 
-              <div className="section-header" style={{ marginTop: 16 }}>
-                <h3>Student Cohort Snapshot</h3>
-                <span className="subtext">Graduating 2026</span>
-              </div>
-              <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
+              <div className="grid" style={{ gridTemplateColumns: 'minmax(320px, 1fr) repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
                 {[
-                  { key: 'overall', title: 'Overall' },
-                  { key: 'cse', title: 'CSE + CSE-R' },
-                  { key: 'ece', title: 'ECE' },
-                  { key: 'cb', title: 'CB' },
-                ].map((b) => {
-                  const data = stats.branch_summary?.[b.key] || {};
+                  { key: 'overall', title: 'Overall', variant: 'large' },
+                  { key: 'cse', title: 'CSE & CSE Research', variant: 'small' },
+                  { key: 'ece', title: 'ECE', variant: 'small' },
+                  { key: 'cb', title: 'CB', variant: 'small' },
+                ].map((section) => {
+                  const data = stats.branch_summary?.[section.key] || {};
+                  const cardStyle = section.variant === 'large'
+                    ? { gridColumn: 'span 2', background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.08), rgba(15, 23, 42, 0.9))' }
+                    : { background: 'rgba(17, 24, 39, 0.9)' };
+                  const metrics = [
+                    { label: 'Total Students (2026)', value: data.total_students },
+                    { label: 'Total Placed', value: data.placed_students },
+                    { label: 'Intern Offers', value: data.total_intern_offers },
+                    { label: 'FTE Offers', value: data.total_fte_offers },
+                    { label: 'Intern+FTE Offers', value: data.total_combo_offers },
+                    { label: 'A+ Offers', value: data.total_Aplus_offers },
+                    { label: 'A Offers', value: data.total_A_offers },
+                    { label: 'B Offers', value: data.total_B_offers },
+                    { label: 'Highest CTC', value: formatInr(data.highest_ctc, 'p.a.') },
+                    { label: 'Avg CTC', value: formatInr(data.average_ctc, 'p.a.') },
+                    { label: 'Median CTC', value: formatInr(data.median_ctc, 'p.a.') },
+                    { label: 'Highest Stipend', value: formatInr(data.highest_stipend, 'p.m.') },
+                    { label: 'Avg Stipend', value: formatInr(data.average_stipend, 'p.m.') },
+                    { label: 'Placement %', value: formatPct(data.placement_percentage) },
+                    { label: 'Internship %', value: formatPct(data.internship_percentage) },
+                  ];
                   return (
-                    <div key={b.key} className="card" style={{ background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.08), rgba(15, 23, 42, 0.9))' }}>
-                      <div className="stat-label" style={{ marginBottom: 6 }}>{b.title}</div>
-                      <div className="stat-value" style={{ fontSize: 22 }}>{data.total_students ?? '—'} students</div>
-                      <div className="subtext" style={{ marginTop: 6 }}>Placed: {data.placed_students ?? '—'}</div>
-                      <div className="subtext">Placement %: {formatPct(data.placement_percentage)}</div>
+                    <div key={section.key} className="card" style={{ ...cardStyle }}>
+                      <div className="section-header" style={{ marginTop: 0, marginBottom: 12 }}>
+                        <h3 style={{ margin: 0 }}>{section.title}</h3>
+                        {section.key !== 'overall' && <span className="subtext">Graduating 2026</span>}
+                      </div>
+                      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+                        {metrics.map((m) => (
+                          <div key={m.label}>
+                            <div className="stat-label" style={{ fontSize: 12 }}>{m.label}</div>
+                            <div className="stat-value" style={{ fontSize: 16 }}>{m.value ?? '—'}</div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   );
                 })}
