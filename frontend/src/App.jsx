@@ -341,6 +341,11 @@ const App = () => {
   const [error, setError] = useState('');
   const isInitialLoad = useRef(true);
 
+  const formatInr = (val, period = 'p.a.') => {
+    if (val === null || val === undefined || Number.isNaN(Number(val))) return '—';
+    return `INR ${Number(val).toLocaleString('en-IN', { maximumFractionDigits: 2 })} ${period}`;
+  };
+
   const [showCompanyModal, setShowCompanyModal] = useState(false);
   const [editCompany, setEditCompany] = useState(null);
   const [showStudentModal, setShowStudentModal] = useState(false);
@@ -472,11 +477,11 @@ const App = () => {
                 <StatCard label="A+ Offers" value={stats.total_Aplus_offers} />
                 <StatCard label="A Offers" value={stats.total_A_offers} />
                 <StatCard label="B Offers" value={stats.total_B_offers} />
-                <StatCard label="Highest CTC" value={stats.highest_ctc ? `${stats.highest_ctc} LPA` : '—'} />
-                <StatCard label="Average CTC" value={stats.average_ctc ? `${stats.average_ctc.toFixed(2)} LPA` : '—'} />
-                <StatCard label="Median CTC" value={stats.median_ctc ? `${stats.median_ctc} LPA` : '—'} />
-                <StatCard label="Highest Stipend" value={stats.highest_stipend ?? '—'} />
-                <StatCard label="Average Stipend" value={stats.average_stipend ? stats.average_stipend.toFixed(2) : '—'} />
+                <StatCard label="Highest CTC" value={formatInr(stats.highest_ctc, 'p.a.')} />
+                <StatCard label="Average CTC" value={formatInr(stats.average_ctc, 'p.a.')} />
+                <StatCard label="Median CTC" value={formatInr(stats.median_ctc, 'p.a.')} />
+                <StatCard label="Highest Stipend" value={formatInr(stats.highest_stipend, 'p.m.')} />
+                <StatCard label="Average Stipend" value={formatInr(stats.average_stipend, 'p.m.')} />
                 <StatCard label="Internship %" value={`${stats.internship_percentage || 0}%`} />
               </div>
             </div>
