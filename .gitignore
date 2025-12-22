@@ -4,3 +4,4 @@ backend/.env
 frontend/dist
 *.sqlite
 !backend/seed.sqlite
+exports/
