@@ -1,50 +1,20 @@
-import fs from 'fs';
-import path from 'path';
-import sqlite3 from 'sqlite3';
-import { parse } from 'csv-parse';
+import { Pool } from 'pg';
 
-const DB_PATH = path.join(process.cwd(), 'data.sqlite');
-const SEED_PATH = process.env.SQLITE_SEED_PATH || path.join(process.cwd(), 'seed.sqlite');
 const ADMIN_TOKEN = 'admin-static-token';
 
-const ensureSeedDb = () => {
-  if (fs.existsSync(DB_PATH)) return;
-  if (fs.existsSync(SEED_PATH)) {
-    fs.copyFileSync(SEED_PATH, DB_PATH);
-    console.log(`Database seeded from ${SEED_PATH}`);
-  } else {
-    console.warn('No existing database found and no seed file present; starting with empty DB');
-  }
+const pool = new Pool({
+  host: process.env.PGHOST,
+  port: Number(process.env.PGPORT || 5432),
+  database: process.env.PGDATABASE,
+  user: process.env.PGUSER,
+  password: process.env.PGPASSWORD,
+  ssl: process.env.PGSSLMODE === 'disable' ? false : { rejectUnauthorized: false },
+});
+
+const query = async (text, params = []) => {
+  const result = await pool.query(text, params);
+  return result;
 };
-
-ensureSeedDb();
-
-sqlite3.verbose();
-const db = new sqlite3.Database(DB_PATH);
-
-const run = (sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.run(sql, params, function exec(err) {
-      if (err) reject(err);
-      else resolve(this);
-    });
-  });
-
-const get = (sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-      if (err) reject(err);
-      else resolve(row);
-    });
-  });
-
-const all = (sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) reject(err);
-      else resolve(rows);
-    });
-  });
 
 const normalizeProgram = (programRaw = '') => {
   const normalized = programRaw.trim().toUpperCase();
@@ -56,60 +26,60 @@ const normalizeProgram = (programRaw = '') => {
 };
 
 export const initDb = async () => {
-  await run(`CREATE TABLE IF NOT EXISTS companies (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+  await query(`CREATE TABLE IF NOT EXISTS companies (
+      id BIGSERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       role TEXT,
       type TEXT CHECK(type IN ('Intern','FTE','Intern+FTE')),
-      ctc REAL,
-      stipend REAL,
+      ctc DOUBLE PRECISION,
+      stipend DOUBLE PRECISION,
       category TEXT,
-      eligible_cgpa REAL,
-      backlog_allowed INTEGER DEFAULT 0,
+      eligible_cgpa DOUBLE PRECISION,
+      backlog_allowed BOOLEAN DEFAULT false,
       registration_deadline TEXT,
       offer_date TEXT
     );`);
 
-  await run(`CREATE TABLE IF NOT EXISTS students (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+  await query(`CREATE TABLE IF NOT EXISTS students (
+      id BIGSERIAL PRIMARY KEY,
       roll_number TEXT UNIQUE NOT NULL,
       name TEXT NOT NULL,
       program TEXT NOT NULL,
       placement_status TEXT CHECK(placement_status IN ('Placed','Unplaced')) NOT NULL,
-      company_id INTEGER,
+      company_id BIGINT REFERENCES companies(id),
       offer_type TEXT,
-      ctc REAL,
-      stipend REAL,
+      ctc DOUBLE PRECISION,
+      stipend DOUBLE PRECISION,
       registration_deadline TEXT,
-      offer_date TEXT,
-      FOREIGN KEY(company_id) REFERENCES companies(id)
+      offer_date TEXT
     );`);
 
-  await run(`CREATE TABLE IF NOT EXISTS offers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      student_id INTEGER NOT NULL,
-      company_id INTEGER NOT NULL,
+  await query(`CREATE TABLE IF NOT EXISTS offers (
+      id BIGSERIAL PRIMARY KEY,
+      student_id BIGINT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      company_id BIGINT NOT NULL REFERENCES companies(id),
       offer_type TEXT,
-      ctc REAL,
-      stipend REAL,
+      ctc DOUBLE PRECISION,
+      stipend DOUBLE PRECISION,
       registration_deadline TEXT,
-      offer_date TEXT,
-      FOREIGN KEY(student_id) REFERENCES students(id),
-      FOREIGN KEY(company_id) REFERENCES companies(id)
+      offer_date TEXT
     );`);
+
+  await query('CREATE INDEX IF NOT EXISTS idx_offers_student_id ON offers(student_id);');
+  await query('CREATE INDEX IF NOT EXISTS idx_offers_company_id ON offers(company_id);');
 };
 
 const backfillOffers = async () => {
-  const rows = await all(
+  const { rows } = await query(
     `SELECT s.id as student_id, s.company_id, s.offer_type, s.ctc, s.stipend, s.registration_deadline, s.offer_date
      FROM students s
      WHERE s.company_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM offers o WHERE o.student_id = s.id)`
   );
 
   for (const row of rows) {
-    await run(
+    await query(
       `INSERT INTO offers (student_id, company_id, offer_type, ctc, stipend, registration_deadline, offer_date)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [
         row.student_id,
         row.company_id,
@@ -123,85 +93,21 @@ const backfillOffers = async () => {
   }
 };
 
-const parseCsvRow = (row) => {
-  const roll = row[1]?.trim();
-  const name = row[2]?.trim();
-  const program = normalizeProgram(row[3] || '');
-  const statusRaw = (row[4] || '').toUpperCase();
-  const status = statusRaw.includes('PLACED') ? 'Placed' : 'Unplaced';
-  const company = row[5]?.trim() || '';
-
-  if (!roll || roll === 'Roll No.' || !name) return null;
-  if (!/MT\d+/.test(roll)) return null;
-
-  return { roll, name, program, status, company };
+export const listCompanies = async () => {
+  const { rows } = await query('SELECT * FROM companies ORDER BY name ASC');
+  return rows;
 };
 
-const insertCompanyIfMissing = async (name) => {
-  if (!name || name.toUpperCase() === 'UNPLACED') return null;
-  const existing = await get('SELECT id FROM companies WHERE lower(name)=lower(?)', [name]);
-  if (existing) return existing.id;
-  const result = await run(
-    'INSERT INTO companies (name, role, type, ctc, stipend, category) VALUES (?, ?, ?, ?, ?, ?)',
-    [name, '', 'FTE', null, null, null]
-  );
-  return result.lastID;
+export const getCompany = async (id) => {
+  const { rows } = await query('SELECT * FROM companies WHERE id = $1', [id]);
+  return rows[0];
 };
 
-export const seedFromCsv = async (csvPath) => {
-  const studentCount = await get('SELECT COUNT(1) as count FROM students');
-  if (studentCount?.count > 0) return; // avoid duplicate seed
-
-  const parser = fs
-    .createReadStream(csvPath)
-    .pipe(parse({ relax_quotes: true }));
-
-  const rows = [];
-  for await (const record of parser) {
-    const parsed = parseCsvRow(record);
-    if (parsed) rows.push(parsed);
-  }
-
-  for (const row of rows) {
-    const companyNames = row.company
-      ? row.company
-          .split(/[,/]| and /i)
-          .map((c) => c.trim())
-          .filter(Boolean)
-      : [];
-
-    const offerCompanyIds = [];
-    for (const name of companyNames) {
-      const cid = await insertCompanyIfMissing(name);
-      if (cid) offerCompanyIds.push(cid);
-    }
-
-    const primaryCompanyId = offerCompanyIds[0] || null;
-
-    const studentResult = await run(
-      `INSERT OR IGNORE INTO students (roll_number, name, program, placement_status, company_id, offer_type)
-       VALUES (?, ?, ?, ?, ?, ?)` ,
-      [row.roll, row.name, row.program, row.status, primaryCompanyId, primaryCompanyId ? 'FTE' : null]
-    );
-
-    const studentId = studentResult.lastID;
-    if (studentId && offerCompanyIds.length) {
-      for (const cid of offerCompanyIds) {
-        await run(
-          `INSERT INTO offers (student_id, company_id, offer_type) VALUES (?, ?, ?)`,
-          [studentId, cid, 'FTE']
-        );
-      }
-    }
-  }
-};
-
-export const listCompanies = () => all('SELECT * FROM companies ORDER BY name ASC');
-export const getCompany = (id) => get('SELECT * FROM companies WHERE id = ?', [id]);
 export const createCompany = async (payload) => {
-  const result = await run(
+  const { rows } = await query(
     `INSERT INTO companies (name, role, type, ctc, stipend, category, eligible_cgpa, backlog_allowed, registration_deadline, offer_date)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     RETURNING *`,
     [
       payload.name,
       payload.role || '',
@@ -210,17 +116,18 @@ export const createCompany = async (payload) => {
       payload.stipend ?? null,
       payload.category || null,
       payload.eligible_cgpa ?? null,
-      payload.backlog_allowed ? 1 : 0,
+      payload.backlog_allowed ? true : false,
       payload.registration_deadline || null,
       payload.offer_date || null,
     ]
   );
-  return getCompany(result.lastID);
+  return rows[0];
 };
 
 export const updateCompany = async (id, payload) => {
-  await run(
-    `UPDATE companies SET name=?, role=?, type=?, ctc=?, stipend=?, category=?, eligible_cgpa=?, backlog_allowed=?, registration_deadline=?, offer_date=? WHERE id=?`,
+  const { rows } = await query(
+    `UPDATE companies SET name=$1, role=$2, type=$3, ctc=$4, stipend=$5, category=$6, eligible_cgpa=$7, backlog_allowed=$8, registration_deadline=$9, offer_date=$10
+     WHERE id=$11 RETURNING *`,
     [
       payload.name,
       payload.role || '',
@@ -229,19 +136,21 @@ export const updateCompany = async (id, payload) => {
       payload.stipend ?? null,
       payload.category || null,
       payload.eligible_cgpa ?? null,
-      payload.backlog_allowed ? 1 : 0,
+      payload.backlog_allowed ? true : false,
       payload.registration_deadline || null,
       payload.offer_date || null,
       id,
     ]
   );
-  return getCompany(id);
+  return rows[0];
 };
 
-export const deleteCompany = (id) => run('DELETE FROM companies WHERE id=?', [id]);
+export const deleteCompany = async (id) => {
+  await query('DELETE FROM companies WHERE id=$1', [id]);
+};
 
 const fetchStudentWithCompanies = async (where = '', params = []) => {
-  const students = await all(
+  const { rows: students } = await query(
     `SELECT s.*, c.name as company_name, c.category as company_category, c.type as company_type, c.ctc as company_ctc, c.stipend as company_stipend
      FROM students s
      LEFT JOIN companies c ON s.company_id = c.id
@@ -253,12 +162,12 @@ const fetchStudentWithCompanies = async (where = '', params = []) => {
   const studentIds = students.map((s) => s.id);
   if (!studentIds.length) return students.map((s) => ({ ...s, offers: [] }));
 
-  const offers = await all(
+  const { rows: offers } = await query(
     `SELECT o.*, co.name as company_name, co.category as company_category, co.type as company_type, co.ctc as company_ctc, co.stipend as company_stipend
      FROM offers o
      JOIN companies co ON o.company_id = co.id
-     WHERE o.student_id IN (${studentIds.map(() => '?').join(',')})`,
-    studentIds
+     WHERE o.student_id = ANY($1::bigint[])`,
+    [studentIds]
   );
 
   const offersByStudent = offers.reduce((acc, offer) => {
@@ -273,17 +182,17 @@ const fetchStudentWithCompanies = async (where = '', params = []) => {
 export const listStudents = () => fetchStudentWithCompanies();
 
 export const getStudent = async (id) => {
-  const students = await fetchStudentWithCompanies('WHERE s.id = ?', [id]);
+  const students = await fetchStudentWithCompanies('WHERE s.id = $1', [id]);
   return students[0];
 };
 
 const replaceOffers = async (studentId, offers = []) => {
-  await run('DELETE FROM offers WHERE student_id = ?', [studentId]);
+  await query('DELETE FROM offers WHERE student_id = $1', [studentId]);
   for (const offer of offers) {
     if (!offer.company_id) continue;
-    await run(
+    await query(
       `INSERT INTO offers (student_id, company_id, offer_type, ctc, stipend, registration_deadline, offer_date)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [
         studentId,
         offer.company_id,
@@ -301,10 +210,11 @@ export const createStudent = async (payload) => {
   const isPlaced = payload.placement_status === 'Placed';
   const primaryCompany = isPlaced ? (payload.offers?.[0]?.company_id || payload.company_id || null) : null;
   const primaryOfferType = isPlaced ? (payload.offers?.[0]?.offer_type || payload.offer_type || null) : null;
-  const result = await run(
+
+  const { rows } = await query(
     `INSERT INTO students (roll_number, name, program, placement_status, company_id, offer_type, ctc, stipend, registration_deadline, offer_date)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     RETURNING id`,
     [
       payload.roll_number,
       payload.name,
@@ -319,7 +229,7 @@ export const createStudent = async (payload) => {
     ]
   );
 
-  const studentId = result.lastID;
+  const studentId = rows[0]?.id;
   if (isPlaced && payload.offers?.length) await replaceOffers(studentId, payload.offers);
   return getStudent(studentId);
 };
@@ -328,9 +238,10 @@ export const updateStudent = async (id, payload) => {
   const isPlaced = payload.placement_status === 'Placed';
   const primaryCompany = isPlaced ? (payload.offers?.[0]?.company_id || payload.company_id || null) : null;
   const primaryOfferType = isPlaced ? (payload.offers?.[0]?.offer_type || payload.offer_type || null) : null;
-  await run(
-    `UPDATE students SET roll_number=?, name=?, program=?, placement_status=?, company_id=?, offer_type=?, ctc=?, stipend=?, registration_deadline=?, offer_date=?
-     WHERE id=?`,
+
+  await query(
+    `UPDATE students SET roll_number=$1, name=$2, program=$3, placement_status=$4, company_id=$5, offer_type=$6, ctc=$7, stipend=$8, registration_deadline=$9, offer_date=$10
+     WHERE id=$11`,
     [
       payload.roll_number,
       payload.name,
@@ -350,13 +261,16 @@ export const updateStudent = async (id, payload) => {
   await replaceOffers(id, offerPayload);
   return getStudent(id);
 };
-export const deleteStudent = (id) => run('DELETE FROM students WHERE id=?', [id]);
+
+export const deleteStudent = async (id) => {
+  await query('DELETE FROM students WHERE id=$1', [id]);
+};
 
 export const buildStats = async () => {
   const companies = await listCompanies();
   const students = await listStudents();
 
-  const offers = await all(
+  const { rows: offers } = await query(
     `SELECT o.*, c.category as company_category, c.type as company_type, c.ctc as company_ctc, c.stipend as company_stipend
      FROM offers o
      JOIN companies c ON o.company_id = c.id`
@@ -477,5 +391,18 @@ export const buildStats = async () => {
 };
 
 export const adminToken = ADMIN_TOKEN;
-export const closeDb = () => db.close();
+export const closeDb = () => pool.end();
 export const ensureOfferBackfill = backfillOffers;
+export const getTableCounts = async () => {
+  const [companies, students, offers] = await Promise.all([
+    query('SELECT count(*)::int AS count FROM companies'),
+    query('SELECT count(*)::int AS count FROM students'),
+    query('SELECT count(*)::int AS count FROM offers'),
+  ]);
+
+  return {
+    companies: companies.rows[0]?.count ?? 0,
+    students: students.rows[0]?.count ?? 0,
+    offers: offers.rows[0]?.count ?? 0,
+  };
+};
