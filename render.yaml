@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: placement-tracker-api
+    env: node
+    plan: free
+    region: oregon
+    branch: main
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: PORT
+        value: 4000
+    disk:
+      name: sqlite-data
+      mountPath: /opt/render/project/src/backend
+      sizeGB: 1
