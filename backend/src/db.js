@@ -378,11 +378,29 @@ export const buildStats = async () => {
 
   const average = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
 
-  const totalStudents = students.length || 1;
-  const placedStudentIds = new Set(offers.map((o) => o.student_id));
-  const placedCount = placedStudentIds.size;
+  const totalStudents = students.length;
+  const placedCount = students.filter((s) => s.placement_status === 'Placed').length;
   const fteCount = fteOffers.length + comboOffers.length;
   const internCount = internOffers.length + comboOffers.length;
+
+  const toPct = (num, den) => (den ? Number(((num / den) * 100).toFixed(2)) : 0);
+
+  const summarize = (subset) => {
+    const total = subset.length;
+    const placed = subset.filter((s) => s.placement_status === 'Placed').length;
+    return {
+      total_students: total,
+      placed_students: placed,
+      placement_percentage: toPct(placed, total),
+    };
+  };
+
+  const branchSummary = {
+    overall: summarize(students),
+    cse: summarize(students.filter((s) => s.program === 'CSE' || s.program === 'CSE-R')),
+    ece: summarize(students.filter((s) => s.program === 'ECE')),
+    cb: summarize(students.filter((s) => s.program === 'CB')),
+  };
 
   return {
     number_of_companies: companies.length,
@@ -401,9 +419,12 @@ export const buildStats = async () => {
     lowest_stipend: stipendValues.length ? Math.min(...stipendValues) : null,
     average_stipend: average(stipendValues),
     median_stipend: median(stipendValues),
-    fte_percentage: Number(((fteCount / totalStudents) * 100).toFixed(2)),
-    internship_percentage: Number(((internCount / totalStudents) * 100).toFixed(2)),
-    overall_placement_percentage: Number(((placedCount / totalStudents) * 100).toFixed(2)),
+    fte_percentage: toPct(fteCount, totalStudents),
+    internship_percentage: toPct(internCount, totalStudents),
+    overall_placement_percentage: toPct(placedCount, totalStudents),
+    total_students: totalStudents,
+    total_placed_students: placedCount,
+    branch_summary: branchSummary,
   };
 };
 

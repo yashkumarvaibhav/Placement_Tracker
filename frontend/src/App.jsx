@@ -346,6 +346,8 @@ const App = () => {
     return `INR ${Number(val).toLocaleString('en-IN', { maximumFractionDigits: 2 })} ${period}`;
   };
 
+  const formatPct = (val) => (val === null || val === undefined || Number.isNaN(Number(val)) ? '—' : `${val}%`);
+
   const [showCompanyModal, setShowCompanyModal] = useState(false);
   const [editCompany, setEditCompany] = useState(null);
   const [showStudentModal, setShowStudentModal] = useState(false);
@@ -483,6 +485,29 @@ const App = () => {
                 <StatCard label="Highest Stipend" value={formatInr(stats.highest_stipend, 'p.m.')} />
                 <StatCard label="Average Stipend" value={formatInr(stats.average_stipend, 'p.m.')} />
                 <StatCard label="Internship %" value={`${stats.internship_percentage || 0}%`} />
+              </div>
+
+              <div className="section-header" style={{ marginTop: 16 }}>
+                <h3>Student Cohort Snapshot</h3>
+                <span className="subtext">Graduating 2026</span>
+              </div>
+              <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
+                {[
+                  { key: 'overall', title: 'Overall' },
+                  { key: 'cse', title: 'CSE + CSE-R' },
+                  { key: 'ece', title: 'ECE' },
+                  { key: 'cb', title: 'CB' },
+                ].map((b) => {
+                  const data = stats.branch_summary?.[b.key] || {};
+                  return (
+                    <div key={b.key} className="card" style={{ background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.08), rgba(15, 23, 42, 0.9))' }}>
+                      <div className="stat-label" style={{ marginBottom: 6 }}>{b.title}</div>
+                      <div className="stat-value" style={{ fontSize: 22 }}>{data.total_students ?? '—'} students</div>
+                      <div className="subtext" style={{ marginTop: 6 }}>Placed: {data.placed_students ?? '—'}</div>
+                      <div className="subtext">Placement %: {formatPct(data.placement_percentage)}</div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
