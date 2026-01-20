@@ -11,22 +11,23 @@ const getPool = async () => {
 
   const defaultPort = Number(process.env.PGPORT || 6543);
   const fallbackPort = defaultPort === 6543 ? 5432 : 6543;
-  const projectHost = 'db.bqldotdtsodmfmnxwavl.supabase.co';
 
-  const config = {
+  // Configuration for the pool
+  // Note: We will use these settings for the "Test" pool directly.
+  // We won't re-create the pool, so we ensure these settings are production-ready.
+  const baseConfig = {
     database: process.env.PGDATABASE,
     user: process.env.PGUSER,
     password: process.env.PGPASSWORD,
     ssl: process.env.PGSSLMODE === 'disable' ? false : { rejectUnauthorized: false },
-    connectionTimeoutMillis: 5000,
+    connectionTimeoutMillis: 10000, // Generous timeout for the initial connect
     idleTimeoutMillis: 30000,
     max: 4,
   };
 
   let resolvedPoolerIPs = [];
-  let resolvedDirectIPs = [];
 
-  // 1. Resolve IPs for the Env Var Host (Pooler)
+  // 1. Resolve IPs for the Pooler (Force IPv4)
   if (process.env.PGHOSTADDR) {
     resolvedPoolerIPs = [process.env.PGHOSTADDR];
   } else {
@@ -41,19 +42,6 @@ const getPool = async () => {
     }
   }
 
-  // 2. Resolve IPs for the Direct Host (Force IPv4)
-  // This addresses the ENETUNREACH error seen with IPv6
-  try {
-    console.log(`[DB] Resolving Direct Host DNS (IPv4) for ${projectHost}...`);
-    const addresses = await dns.resolve4(projectHost);
-    if (addresses && addresses.length > 0) {
-      resolvedDirectIPs = addresses;
-      console.log(`[DB] Resolved Direct IPs: ${addresses.join(', ')}`);
-    }
-  } catch (err) {
-    console.warn('[DB] DNS Resolution failed (Direct):', err.message);
-  }
-
   const candidates = [];
 
   // Group A: Pooler IPs (Try both ports)
@@ -62,53 +50,53 @@ const getPool = async () => {
     candidates.push({ ip, port: fallbackPort, label: 'Pooler(SEC)' });
   }
 
-  // Group B: Direct Host IPs (IPv4 Only)
-  for (const ip of resolvedDirectIPs) {
-    candidates.push({ ip, port: 5432, label: 'DIRECT(IPv4)' });
-  }
-
-  // Fallback: If no IPs resolved, try hostnames (but likely will fail if DNS is broken)
+  // Fallback: If no IPs resolved, try hostname
   if (candidates.length === 0) {
     candidates.push({ host: process.env.PGHOST, port: defaultPort, label: 'Pooler(DNS)' });
-    candidates.push({ host: projectHost, port: 5432, label: 'DIRECT(DNS)' });
   }
 
-  // 3. Race/Failover Logic
+  // 2. Race/Failover Logic
   for (const candidate of candidates) {
     const targetDesc = candidate.host ? candidate.host : candidate.ip;
     console.log(`[DB] Testing connection to [${candidate.label}] ${targetDesc} on PORT ${candidate.port}...`);
 
-    const testConfig = {
-      ...config,
+    const candidateConfig = {
+      ...baseConfig,
       port: candidate.port,
     };
-    if (candidate.ip) testConfig.hostaddr = candidate.ip;
-    if (candidate.host) testConfig.host = candidate.host;
+    if (candidate.ip) candidateConfig.hostaddr = candidate.ip;
+    if (candidate.host) candidateConfig.host = candidate.host;
 
-    const testPool = new Pool(testConfig);
+    const testPool = new Pool(candidateConfig);
+
+    // Add an error handler to preventing crashing during the test phase
+    testPool.on('error', (err) => {
+      // Silently catch errors on the pool during testing, we'll handle them in the try/catch block
+    });
+
     try {
       const client = await testPool.connect();
+      // If we are here, we connected!
       client.release();
-      console.log(`[DB] Connection VALIDATED on ${targetDesc}:${candidate.port}! Locking in.`);
+      console.log(`[DB] Connection VALIDATED on ${targetDesc}:${candidate.port}! Keeping this connection.`);
 
-      await testPool.end(); // Close test pool
+      // CRITICAL CHANGE: We keep this pool. We do NOT destroy it.
+      // Reuse the already-active pool to avoid a second handshake.
 
-      // Upgrade to real pool
-      const finalConfig = {
-        ...testConfig,
-        connectionTimeoutMillis: 10000,
-      };
+      pool = testPool;
 
-      pool = new Pool(finalConfig);
+      // Update error handler for production use
+      pool.removeAllListeners('error');
       pool.on('error', (err) => {
         console.error('[DB] Unexpected error on idle client', err);
-        pool = null; // Reset pool on fatal error
+        // Do NOT set pool = null immediately, let the pool handle its own recovery if possible,
+        // unless it's a fatal error. But for now, just logging is safer to prevent churn.
       });
+
       return pool;
     } catch (err) {
-      // Intentionally brief log to avoid clutter if many fail
       console.warn(`[DB] Failed ${candidate.label} ${targetDesc}:${candidate.port}: ${err.message}`);
-      await testPool.end();
+      await testPool.end(); // Clean up the failed pool
     }
   }
 
@@ -128,11 +116,16 @@ const query = async (text, params = []) => {
       if (retries < maxRetries) {
         retries++;
         console.error(`[DB] Query failed, retrying (${retries}/${maxRetries})...`, err.message);
-        if (pool) {
-          try { await pool.end(); } catch (e) { }
-          pool = null;
+
+        // Only reset the global pool if the error is severe (connection related)
+        if (err.message.includes('timeout') || err.message.includes('closed') || err.message.includes('refused')) {
+          if (pool) {
+            try { await pool.end(); } catch (e) { }
+            pool = null; // Force a fresh connection hunt next time
+          }
         }
-        // Quadratic backoff: 1s, 2s, 4s
+
+        // Quadratic backoff
         await new Promise(res => setTimeout(res, 1000 * Math.pow(2, retries - 1)));
       } else {
         throw err;
@@ -141,7 +134,6 @@ const query = async (text, params = []) => {
   }
 };
 
-// ... Normalization and Table Init functions remain identical ...
 const normalizeProgram = (programRaw = '') => {
   const normalized = programRaw.trim().toUpperCase();
   if (normalized.startsWith('CSE R')) return 'CSE-R';
