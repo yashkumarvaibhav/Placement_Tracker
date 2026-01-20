@@ -10,7 +10,7 @@ const getPool = async () => {
   if (pool) return pool;
 
   const config = {
-    port: Number(process.env.PGPORT || 5432),
+    port: Number(process.env.PGPORT || 6543),
     database: process.env.PGDATABASE,
     user: process.env.PGUSER,
     password: process.env.PGPASSWORD,
