@@ -15,31 +15,31 @@ const getPool = async () => {
     user: process.env.PGUSER,
     password: process.env.PGPASSWORD,
     ssl: process.env.PGSSLMODE === 'disable' ? false : { rejectUnauthorized: false },
-    // Robustness Settings for Free Tier:
-    connectionTimeoutMillis: 15000, // Wait 15s for new connection
-    idleTimeoutMillis: 2000,        // Close idle connections after 2s (prevents stale connection errors)
-    max: 2,                         // Limit pool size to avoid "Too many connections" errors
+    // Relaxed Settings for Stability:
+    connectionTimeoutMillis: 60000, // Wait 60s for new connection (Super Patient)
+    idleTimeoutMillis: 30000,       // Keep idle connections for 30s (Reduce churn)
+    max: 4,                         // Allow 4 parallel connections (Handle dashboard load)
   };
 
   // If hostaddr is already manually set, use it. Otherwise, force resolve IPv4.
   if (process.env.PGHOSTADDR) {
     config.host = process.env.PGHOST;
     config.hostaddr = process.env.PGHOSTADDR;
-    console.log('Using manual PGHOSTADDR:', config.hostaddr);
+    console.log(`[DB] Using manual PGHOSTADDR: ${config.hostaddr}`);
   } else {
     try {
-      console.log(`Resolving DNS for ${process.env.PGHOST}...`);
+      console.log(`[DB] Resolving DNS for ${process.env.PGHOST}...`);
       const addresses = await dns.resolve4(process.env.PGHOST);
       if (addresses && addresses.length > 0) {
         config.host = process.env.PGHOST; // Keep hostname for SSL verification
         config.hostaddr = addresses[0];   // Force connect to IPv4
-        console.log(`Resolved ${process.env.PGHOST} to IPv4: ${config.hostaddr}`);
+        console.log(`[DB] Resolved ${process.env.PGHOST} to IPv4: ${config.hostaddr}`);
       } else {
-        console.warn('No IPv4 addresses found, falling back to default hostname.');
+        console.warn('[DB] No IPv4 addresses found, falling back to default hostname.');
         config.host = process.env.PGHOST;
       }
     } catch (err) {
-      console.error('DNS Resolution failed:', err.message);
+      console.error('[DB] DNS Resolution failed:', err.message);
       config.host = process.env.PGHOST;
     }
   }
@@ -48,8 +48,7 @@ const getPool = async () => {
 
   // Log unexpected pool errors
   pool.on('error', (err) => {
-    console.error('Unexpected error on idle client', err);
-    // Don't exit, just log it. The pool will discard the client.
+    console.error('[DB] Unexpected error on idle client', err);
   });
 
   return pool;
@@ -66,9 +65,9 @@ const query = async (text, params = []) => {
     } catch (err) {
       if (retries < maxRetries) {
         retries++;
-        console.error(`Query failed, retrying (${retries}/${maxRetries})...`, err.message);
+        console.error(`[DB] Query failed, retrying (${retries}/${maxRetries})...`, err.message);
         // If connection terminated, maybe we should slightly delay
-        await new Promise(res => setTimeout(res, 1500));
+        await new Promise(res => setTimeout(res, 2000));
       } else {
         throw err;
       }
