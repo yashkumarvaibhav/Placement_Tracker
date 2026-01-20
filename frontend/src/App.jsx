@@ -134,13 +134,13 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
     ? initial.offers
     : initial.company_id
       ? [{
-          company_id: initial.company_id,
-          offer_type: initial.offer_type || '',
-          ctc: initial.ctc ?? '',
-          stipend: initial.stipend ?? '',
-          registration_deadline: initial.registration_deadline || '',
-          offer_date: initial.offer_date || '',
-        }]
+        company_id: initial.company_id,
+        offer_type: initial.offer_type || '',
+        ctc: initial.ctc ?? '',
+        stipend: initial.stipend ?? '',
+        registration_deadline: initial.registration_deadline || '',
+        offer_date: initial.offer_date || '',
+      }]
       : [];
 
   const [form, setForm] = useState({
@@ -182,23 +182,23 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
 
       nextOffers[idx] = sameCompany
         ? {
-            ...existing,
-            company_id: companyId,
-            offer_type: pick(existing.offer_type, company.type || ''),
-            ctc: pick(existing.ctc, company.ctc ?? ''),
-            stipend: pick(existing.stipend, company.stipend ?? ''),
-            registration_deadline: pick(existing.registration_deadline, company.registration_deadline || ''),
-            offer_date: pick(existing.offer_date, company.offer_date || ''),
-          }
+          ...existing,
+          company_id: companyId,
+          offer_type: pick(existing.offer_type, company.type || ''),
+          ctc: pick(existing.ctc, company.ctc ?? ''),
+          stipend: pick(existing.stipend, company.stipend ?? ''),
+          registration_deadline: pick(existing.registration_deadline, company.registration_deadline || ''),
+          offer_date: pick(existing.offer_date, company.offer_date || ''),
+        }
         : {
-            ...existing,
-            company_id: companyId,
-            offer_type: company.type || '',
-            ctc: company.ctc ?? '',
-            stipend: company.stipend ?? '',
-            registration_deadline: company.registration_deadline || '',
-            offer_date: company.offer_date || '',
-          };
+          ...existing,
+          company_id: companyId,
+          offer_type: company.type || '',
+          ctc: company.ctc ?? '',
+          stipend: company.stipend ?? '',
+          registration_deadline: company.registration_deadline || '',
+          offer_date: company.offer_date || '',
+        };
 
       return { ...prev, offers: nextOffers };
     });
@@ -415,26 +415,41 @@ const App = () => {
   const refresh = async () => {
     const initial = isInitialLoad.current;
     if (initial) setLoading(true);
-    try {
-      const [statsRes, companyRes, studentRes] = await Promise.all([
-        api.get('/stats'),
-        api.get('/companies'),
-        api.get('/students'),
-      ]);
-      setStats(statsRes.data);
-      setCompanies(companyRes.data);
-      setStudents(studentRes.data);
-      if (initial) isInitialLoad.current = false;
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      if (initial) setLoading(false);
-    }
+
+    let retries = 0;
+    const maxRetries = 12; // 12 * 5s = 60s max wait
+
+    const fetchData = async () => {
+      try {
+        const [statsRes, companyRes, studentRes] = await Promise.all([
+          api.get('/stats'),
+          api.get('/companies'),
+          api.get('/students'),
+        ]);
+        setStats(statsRes.data);
+        setCompanies(companyRes.data);
+        setStudents(studentRes.data);
+        setError('');
+        if (initial) isInitialLoad.current = false;
+        if (initial) setLoading(false);
+      } catch (err) {
+        if (retries < maxRetries) {
+          retries++;
+          setError(`Connecting to server... (Attempt ${retries}/${maxRetries}). Please wait while the free server wakes up.`);
+          setTimeout(fetchData, 5000);
+        } else {
+          setError(`Network Error: ${err.message}. The server might be down or taking too long.`);
+          if (initial) setLoading(false);
+        }
+      }
+    };
+
+    fetchData();
   };
 
   useEffect(() => {
     if (isGoogleAuthed) refresh();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isGoogleAuthed]);
 
   const handleLogin = async (email, password) => {
@@ -685,23 +700,23 @@ const App = () => {
                             ? { backgroundColor: '#fef2f2' }
                             : {};
                       return (
-                      <tr key={c.id} style={rowStyle}>
-                        <td>{c.name}</td>
-                        <td>{c.role}</td>
-                        <td><span className="chip">{c.type || '—'}</span></td>
-                        <td>{c.category || '—'}</td>
-                        <td>{c.ctc ?? '—'}</td>
-                        <td>{c.stipend ?? '—'}</td>
-                        <td>{formatDate(c.offer_date)}</td>
-                        <td>
-                          {isAdmin && (
-                            <div className="flex-row">
-                              <button className="secondary" onClick={() => { setEditCompany(c); setShowCompanyModal(true); }}>Edit</button>
-                              <button className="secondary" onClick={() => deleteCompanyAction(c.id)}>Delete</button>
-                            </div>
-                          )}
-                        </td>
-                      </tr>
+                        <tr key={c.id} style={rowStyle}>
+                          <td>{c.name}</td>
+                          <td>{c.role}</td>
+                          <td><span className="chip">{c.type || '—'}</span></td>
+                          <td>{c.category || '—'}</td>
+                          <td>{c.ctc ?? '—'}</td>
+                          <td>{c.stipend ?? '—'}</td>
+                          <td>{formatDate(c.offer_date)}</td>
+                          <td>
+                            {isAdmin && (
+                              <div className="flex-row">
+                                <button className="secondary" onClick={() => { setEditCompany(c); setShowCompanyModal(true); }}>Edit</button>
+                                <button className="secondary" onClick={() => deleteCompanyAction(c.id)}>Delete</button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
                       );
                     })}
                   </tbody>
@@ -754,25 +769,25 @@ const App = () => {
                         ? (s.offers.map((o) => formatDate(o.offer_date || o.company_offer_date)).filter((x) => x !== '—').join(', ') || '—')
                         : formatDate(s.offer_date ?? s.company_offer_date);
                       return (
-                      <tr key={s.id} style={rowStyle}>
-                        <td>{s.roll_number}</td>
-                        <td>{s.name}</td>
-                        <td>{s.program}</td>
-                        <td><span className="chip">{s.placement_status}</span></td>
-                        <td>{(s.offers?.length ? s.offers.map((o) => o.company_name).join(', ') : s.company_name) || '—'}</td>
-                        <td>{(s.offers?.length ? s.offers.map((o) => o.offer_type || '—').join(', ') : s.offer_type) || '—'}</td>
-                        <td>{s.offers?.length ? (s.offers.map((o) => o.ctc ?? o.company_ctc).filter(Boolean).join(', ') || '—') : (s.ctc ?? s.company_ctc ?? '—')}</td>
-                        <td>{s.offers?.length ? (s.offers.map((o) => o.stipend ?? o.company_stipend).filter(Boolean).join(', ') || '—') : (s.stipend ?? s.company_stipend ?? '—')}</td>
-                        <td>{offerDates}</td>
-                        <td>
-                          {isAdmin && (
-                            <div className="flex-row">
-                              <button className="secondary" onClick={() => { setEditStudent(s); setShowStudentModal(true); }}>Edit</button>
-                              <button className="secondary" onClick={() => deleteStudentAction(s.id)}>Delete</button>
-                            </div>
-                          )}
-                        </td>
-                      </tr>
+                        <tr key={s.id} style={rowStyle}>
+                          <td>{s.roll_number}</td>
+                          <td>{s.name}</td>
+                          <td>{s.program}</td>
+                          <td><span className="chip">{s.placement_status}</span></td>
+                          <td>{(s.offers?.length ? s.offers.map((o) => o.company_name).join(', ') : s.company_name) || '—'}</td>
+                          <td>{(s.offers?.length ? s.offers.map((o) => o.offer_type || '—').join(', ') : s.offer_type) || '—'}</td>
+                          <td>{s.offers?.length ? (s.offers.map((o) => o.ctc ?? o.company_ctc).filter(Boolean).join(', ') || '—') : (s.ctc ?? s.company_ctc ?? '—')}</td>
+                          <td>{s.offers?.length ? (s.offers.map((o) => o.stipend ?? o.company_stipend).filter(Boolean).join(', ') || '—') : (s.stipend ?? s.company_stipend ?? '—')}</td>
+                          <td>{offerDates}</td>
+                          <td>
+                            {isAdmin && (
+                              <div className="flex-row">
+                                <button className="secondary" onClick={() => { setEditStudent(s); setShowStudentModal(true); }}>Edit</button>
+                                <button className="secondary" onClick={() => deleteStudentAction(s.id)}>Delete</button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
                       );
                     })}
                   </tbody>
