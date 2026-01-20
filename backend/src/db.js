@@ -1,25 +1,56 @@
 import { Pool } from 'pg';
+import dns from 'dns/promises';
 
 const ADMIN_TOKEN = 'admin-static-token';
 
-const pool = new Pool({
-  host: process.env.PGHOST,
-  // If Render cannot reach Supabase over IPv6, set PGHOSTADDR to the IPv4 address of your Supabase host.
-  hostaddr: process.env.PGHOSTADDR,
-  port: Number(process.env.PGPORT || 5432),
-  database: process.env.PGDATABASE,
-  user: process.env.PGUSER,
-  password: process.env.PGPASSWORD,
-  ssl: process.env.PGSSLMODE === 'disable' ? false : { rejectUnauthorized: false },
-  connectionTimeoutMillis: Number(process.env.PGCONNECT_TIMEOUT || 30000),
-});
+// We will initialize this lazily to allow async DNS resolution
+let pool = null;
+
+const getPool = async () => {
+  if (pool) return pool;
+
+  const config = {
+    port: Number(process.env.PGPORT || 5432),
+    database: process.env.PGDATABASE,
+    user: process.env.PGUSER,
+    password: process.env.PGPASSWORD,
+    ssl: process.env.PGSSLMODE === 'disable' ? false : { rejectUnauthorized: false },
+    connectionTimeoutMillis: Number(process.env.PGCONNECT_TIMEOUT || 30000),
+  };
+
+  // If hostaddr is already manually set, use it. Otherwise, force resolve IPv4.
+  if (process.env.PGHOSTADDR) {
+    config.host = process.env.PGHOST;
+    config.hostaddr = process.env.PGHOSTADDR;
+  } else {
+    try {
+      console.log(`Resolving DNS for ${process.env.PGHOST}...`);
+      const addresses = await dns.resolve4(process.env.PGHOST);
+      if (addresses && addresses.length > 0) {
+        config.host = process.env.PGHOST; // Keep hostname for SSL verification
+        config.hostaddr = addresses[0];   // Force connect to IPv4
+        console.log(`Resolved ${process.env.PGHOST} to IPv4: ${config.hostaddr}`);
+      } else {
+        console.warn('No IPv4 addresses found, falling back to default hostname.');
+        config.host = process.env.PGHOST;
+      }
+    } catch (err) {
+      console.error('DNS Resolution failed:', err.message);
+      config.host = process.env.PGHOST;
+    }
+  }
+
+  pool = new Pool(config);
+  return pool;
+};
 
 const query = async (text, params = []) => {
   let retries = 0;
   const maxRetries = 3;
   while (true) {
     try {
-      const result = await pool.query(text, params);
+      const p = await getPool();
+      const result = await p.query(text, params);
       return result;
     } catch (err) {
       if (retries < maxRetries) {
@@ -408,7 +439,9 @@ export const buildStats = async () => {
 };
 
 export const adminToken = ADMIN_TOKEN;
-export const closeDb = () => pool.end();
+export const closeDb = async () => {
+  if (pool) await pool.end();
+};
 export const ensureOfferBackfill = backfillOffers;
 export const getTableCounts = async () => {
   const [companies, students, offers] = await Promise.all([
