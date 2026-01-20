@@ -11,7 +11,7 @@ const pool = new Pool({
   user: process.env.PGUSER,
   password: process.env.PGPASSWORD,
   ssl: process.env.PGSSLMODE === 'disable' ? false : { rejectUnauthorized: false },
-  connectionTimeoutMillis: Number(process.env.PGCONNECT_TIMEOUT || 10000),
+  connectionTimeoutMillis: Number(process.env.PGCONNECT_TIMEOUT || 30000),
 });
 
 const query = async (text, params = []) => {
