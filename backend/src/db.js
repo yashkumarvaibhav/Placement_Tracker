@@ -15,13 +15,17 @@ const getPool = async () => {
     user: process.env.PGUSER,
     password: process.env.PGPASSWORD,
     ssl: process.env.PGSSLMODE === 'disable' ? false : { rejectUnauthorized: false },
-    connectionTimeoutMillis: Number(process.env.PGCONNECT_TIMEOUT || 30000),
+    // Robustness Settings for Free Tier:
+    connectionTimeoutMillis: 15000, // Wait 15s for new connection
+    idleTimeoutMillis: 2000,        // Close idle connections after 2s (prevents stale connection errors)
+    max: 2,                         // Limit pool size to avoid "Too many connections" errors
   };
 
   // If hostaddr is already manually set, use it. Otherwise, force resolve IPv4.
   if (process.env.PGHOSTADDR) {
     config.host = process.env.PGHOST;
     config.hostaddr = process.env.PGHOSTADDR;
+    console.log('Using manual PGHOSTADDR:', config.hostaddr);
   } else {
     try {
       console.log(`Resolving DNS for ${process.env.PGHOST}...`);
@@ -41,6 +45,13 @@ const getPool = async () => {
   }
 
   pool = new Pool(config);
+
+  // Log unexpected pool errors
+  pool.on('error', (err) => {
+    console.error('Unexpected error on idle client', err);
+    // Don't exit, just log it. The pool will discard the client.
+  });
+
   return pool;
 };
 
@@ -56,7 +67,8 @@ const query = async (text, params = []) => {
       if (retries < maxRetries) {
         retries++;
         console.error(`Query failed, retrying (${retries}/${maxRetries})...`, err.message);
-        await new Promise(res => setTimeout(res, 1000)); // wait 1s
+        // If connection terminated, maybe we should slightly delay
+        await new Promise(res => setTimeout(res, 1500));
       } else {
         throw err;
       }
