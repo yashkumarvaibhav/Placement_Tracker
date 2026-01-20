@@ -157,7 +157,17 @@ app.get('/', (_req, res) => {
 });
 
 const start = async () => {
-  await initDb();
+  let dbReady = false;
+  while (!dbReady) {
+    try {
+      await initDb();
+      dbReady = true;
+    } catch (err) {
+      console.error('Failed to connect to DB, retrying in 10s...', err.message);
+      await new Promise(res => setTimeout(res, 10000));
+    }
+  }
+
   // Backfill offers for legacy rows seeded before offers table existed
   try {
     await ensureOfferBackfill();
