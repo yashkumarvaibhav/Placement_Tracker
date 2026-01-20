@@ -11,10 +11,9 @@ const getPool = async () => {
 
   const defaultPort = Number(process.env.PGPORT || 6543);
   const fallbackPort = defaultPort === 6543 ? 5432 : 6543;
-  const projectHost = 'db.bqldotdtsodmfmnxwavl.supabase.co'; // Hardcoded fallback based on project ID
+  const projectHost = 'db.bqldotdtsodmfmnxwavl.supabase.co';
 
   const config = {
-    // Default config (will be overridden per candidate)
     database: process.env.PGDATABASE,
     user: process.env.PGUSER,
     password: process.env.PGPASSWORD,
@@ -24,40 +23,55 @@ const getPool = async () => {
     max: 4,
   };
 
-  let resolvedIPs = [];
+  let resolvedPoolerIPs = [];
+  let resolvedDirectIPs = [];
 
   // 1. Resolve IPs for the Env Var Host (Pooler)
   if (process.env.PGHOSTADDR) {
-    console.log(`[DB] Using manual PGHOSTADDR: ${process.env.PGHOSTADDR}`);
-    resolvedIPs = [process.env.PGHOSTADDR];
+    resolvedPoolerIPs = [process.env.PGHOSTADDR];
   } else {
     try {
-      console.log(`[DB] Resolving DNS for ${process.env.PGHOST}...`);
+      console.log(`[DB] Resolving Pooler DNS (IPv4) for ${process.env.PGHOST}...`);
       const addresses = await dns.resolve4(process.env.PGHOST);
       if (addresses && addresses.length > 0) {
-        console.log(`[DB] Resolved IPv4 (Pooler): ${addresses.join(', ')}`);
-        resolvedIPs = addresses;
-      } else {
-        console.warn('[DB] No IPv4 addresses found for Pooler.');
+        resolvedPoolerIPs = addresses;
       }
     } catch (err) {
-      console.error('[DB] DNS Resolution failed (Pooler):', err.message);
+      console.warn('[DB] DNS Resolution failed (Pooler):', err.message);
     }
+  }
+
+  // 2. Resolve IPs for the Direct Host (Force IPv4)
+  // This addresses the ENETUNREACH error seen with IPv6
+  try {
+    console.log(`[DB] Resolving Direct Host DNS (IPv4) for ${projectHost}...`);
+    const addresses = await dns.resolve4(projectHost);
+    if (addresses && addresses.length > 0) {
+      resolvedDirectIPs = addresses;
+      console.log(`[DB] Resolved Direct IPs: ${addresses.join(', ')}`);
+    }
+  } catch (err) {
+    console.warn('[DB] DNS Resolution failed (Direct):', err.message);
   }
 
   const candidates = [];
 
-  // Group A: Pooler IPs
-  if (resolvedIPs.length > 0) {
-    for (const ip of resolvedIPs) candidates.push({ ip, port: defaultPort, label: 'Pooler IP' });
-    for (const ip of resolvedIPs) candidates.push({ ip, port: fallbackPort, label: 'Pooler IP' });
-  } else {
-    candidates.push({ host: process.env.PGHOST, port: defaultPort, label: 'Pooler Hostname' });
+  // Group A: Pooler IPs (Try both ports)
+  for (const ip of resolvedPoolerIPs) {
+    candidates.push({ ip, port: defaultPort, label: 'Pooler(PRI)' });
+    candidates.push({ ip, port: fallbackPort, label: 'Pooler(SEC)' });
   }
 
-  // Group B: Direct Host Fallback (Bypass Pooler)
-  // This is the "Nuclear Option" - connect directly to the DB instance URL
-  candidates.push({ host: projectHost, port: 5432, label: 'DIRECT DB HOST' });
+  // Group B: Direct Host IPs (IPv4 Only)
+  for (const ip of resolvedDirectIPs) {
+    candidates.push({ ip, port: 5432, label: 'DIRECT(IPv4)' });
+  }
+
+  // Fallback: If no IPs resolved, try hostnames (but likely will fail if DNS is broken)
+  if (candidates.length === 0) {
+    candidates.push({ host: process.env.PGHOST, port: defaultPort, label: 'Pooler(DNS)' });
+    candidates.push({ host: projectHost, port: 5432, label: 'DIRECT(DNS)' });
+  }
 
   // 3. Race/Failover Logic
   for (const candidate of candidates) {
@@ -71,10 +85,6 @@ const getPool = async () => {
     if (candidate.ip) testConfig.hostaddr = candidate.ip;
     if (candidate.host) testConfig.host = candidate.host;
 
-    // IMPORTANT: For Direct Host, the "user" might need to be just 'postgres' if the pooled user fails,
-    // but usually the pooled user works on direct connections too (just without pooling benefits).
-    // usage of 'postgres' user requires administrative password which we likely have in PGPASSWORD.
-
     const testPool = new Pool(testConfig);
     try {
       const client = await testPool.connect();
@@ -83,19 +93,22 @@ const getPool = async () => {
 
       await testPool.end(); // Close test pool
 
-      // Upgrade to real pool (Patient settings)
+      // Upgrade to real pool
       const finalConfig = {
         ...testConfig,
-        connectionTimeoutMillis: 10000, // 10s for real queries
+        connectionTimeoutMillis: 10000,
       };
 
       pool = new Pool(finalConfig);
-      pool.on('error', (err) => console.error('[DB] Unexpected error on idle client', err));
+      pool.on('error', (err) => {
+        console.error('[DB] Unexpected error on idle client', err);
+        pool = null; // Reset pool on fatal error
+      });
       return pool;
     } catch (err) {
-      console.warn(`[DB] Failed to connect to ${targetDesc}:${candidate.port}: ${err.message}`);
+      // Intentionally brief log to avoid clutter if many fail
+      console.warn(`[DB] Failed ${candidate.label} ${targetDesc}:${candidate.port}: ${err.message}`);
       await testPool.end();
-      // Continue loop
     }
   }
 
@@ -115,12 +128,12 @@ const query = async (text, params = []) => {
       if (retries < maxRetries) {
         retries++;
         console.error(`[DB] Query failed, retrying (${retries}/${maxRetries})...`, err.message);
-        // If we fail on an existing pool, we might want to kill it to force re-selection
         if (pool) {
           try { await pool.end(); } catch (e) { }
           pool = null;
         }
-        await new Promise(res => setTimeout(res, 2000));
+        // Quadratic backoff: 1s, 2s, 4s
+        await new Promise(res => setTimeout(res, 1000 * Math.pow(2, retries - 1)));
       } else {
         throw err;
       }
@@ -128,6 +141,7 @@ const query = async (text, params = []) => {
   }
 };
 
+// ... Normalization and Table Init functions remain identical ...
 const normalizeProgram = (programRaw = '') => {
   const normalized = programRaw.trim().toUpperCase();
   if (normalized.startsWith('CSE R')) return 'CSE-R';
