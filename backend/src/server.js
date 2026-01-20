@@ -50,14 +50,22 @@ app.post('/api/login', (req, res) => {
 
 // Company routes
 app.get('/api/companies', async (_req, res) => {
-  const data = await listCompanies();
-  res.json(data);
+  try {
+    const data = await listCompanies();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 });
 
 app.get('/api/companies/:id', async (req, res) => {
-  const company = await getCompany(req.params.id);
-  if (!company) return res.status(404).json({ message: 'Company not found' });
-  return res.json(company);
+  try {
+    const company = await getCompany(req.params.id);
+    if (!company) return res.status(404).json({ message: 'Company not found' });
+    return res.json(company);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 });
 
 app.post('/api/companies', authMiddleware, async (req, res) => {
@@ -87,14 +95,22 @@ app.delete('/api/companies/:id', authMiddleware, async (req, res) => {
 
 // Student routes
 app.get('/api/students', async (_req, res) => {
-  const data = await listStudents();
-  res.json(data);
+  try {
+    const data = await listStudents();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 });
 
 app.get('/api/students/:id', async (req, res) => {
-  const student = await getStudent(req.params.id);
-  if (!student) return res.status(404).json({ message: 'Student not found' });
-  return res.json(student);
+  try {
+    const student = await getStudent(req.params.id);
+    if (!student) return res.status(404).json({ message: 'Student not found' });
+    return res.json(student);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 });
 
 app.post('/api/students', authMiddleware, async (req, res) => {
@@ -139,8 +155,13 @@ app.delete('/api/students/:id', authMiddleware, async (req, res) => {
 });
 
 app.get('/api/stats', async (_req, res) => {
-  const stats = await buildStats();
-  res.json(stats);
+  try {
+    const stats = await buildStats();
+    res.json(stats);
+  } catch (err) {
+    console.error('Error fetching stats:', err.message);
+    res.status(500).json({ message: 'Failed to fetch stats (DB timeout)' });
+  }
 });
 
 app.get('/api/health', async (_req, res) => {
