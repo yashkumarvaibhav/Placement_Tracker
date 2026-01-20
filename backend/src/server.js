@@ -25,7 +25,12 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'GraduateAlgo@1198';
 const PORT = process.env.PORT || 4000;
 
 const app = express();
-app.use(cors());
+const app = express();
+app.use(cors({
+  origin: '*', // Allow all origins for simplicity (or specify your GitHub Pages URL)
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 app.use(express.json());
 
 const authMiddleware = (req, res, next) => {
