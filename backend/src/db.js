@@ -9,93 +9,97 @@ let pool = null;
 const getPool = async () => {
   if (pool) return pool;
 
+  const defaultPort = Number(process.env.PGPORT || 6543);
+  const fallbackPort = defaultPort === 6543 ? 5432 : 6543;
+
   const config = {
-    port: Number(process.env.PGPORT || 6543),
+    // Default config (will be overridden per candidate)
     database: process.env.PGDATABASE,
     user: process.env.PGUSER,
     password: process.env.PGPASSWORD,
     ssl: process.env.PGSSLMODE === 'disable' ? false : { rejectUnauthorized: false },
-    connectionTimeoutMillis: 10000, // 10s timeout per attempt
-    idleTimeoutMillis: 30000,       // Keep idle connections for 30s
+    connectionTimeoutMillis: 5000, // Fast 5s timeout for testing candidates
+    idleTimeoutMillis: 30000,
     max: 4,
   };
 
-  let candidateIPs = [];
+  let resolvedIPs = [];
 
-  // 1. Determine IPs to try (Dual Stack: IPv4 + IPv6)
+  // 1. Resolve IPs
   if (process.env.PGHOSTADDR) {
     console.log(`[DB] Using manual PGHOSTADDR: ${process.env.PGHOSTADDR}`);
-    candidateIPs = [process.env.PGHOSTADDR];
-    config.host = process.env.PGHOST;
+    resolvedIPs = [process.env.PGHOSTADDR];
   } else {
     try {
       console.log(`[DB] Resolving DNS for ${process.env.PGHOST}...`);
-
-      const [ipv4, ipv6] = await Promise.allSettled([
-        dns.resolve4(process.env.PGHOST),
-        dns.resolve6(process.env.PGHOST)
-      ]);
-
-      if (ipv4.status === 'fulfilled' && ipv4.value.length > 0) {
-        console.log(`[DB] IPv4 Candidates: ${ipv4.value.join(', ')}`);
-        candidateIPs.push(...ipv4.value);
-      }
-
-      if (ipv6.status === 'fulfilled' && ipv6.value.length > 0) {
-        console.log(`[DB] IPv6 Candidates: ${ipv6.value.join(', ')}`);
-        candidateIPs.push(...ipv6.value);
-      }
-
-      if (candidateIPs.length > 0) {
-        config.host = process.env.PGHOST;
+      const addresses = await dns.resolve4(process.env.PGHOST);
+      if (addresses && addresses.length > 0) {
+        console.log(`[DB] Resolved IPv4: ${addresses.join(', ')}`);
+        resolvedIPs = addresses;
       } else {
-        console.warn('[DB] No IPs found, falling back to default hostname.');
-        candidateIPs = [];
-        config.host = process.env.PGHOST;
+        console.warn('[DB] No IPv4 addresses found.');
       }
     } catch (err) {
       console.error('[DB] DNS Resolution failed:', err.message);
-      candidateIPs = [];
-      config.host = process.env.PGHOST;
     }
   }
 
-  // 2. Race/Failover Logic: Find the FIRST working IP
-  if (candidateIPs.length > 0) {
-    for (const ip of candidateIPs) {
-      console.log(`[DB] Testing connection to ${ip} on PORT ${config.port}...`);
-      const testConfig = { ...config, hostaddr: ip, connectionTimeoutMillis: 10000 };
-      const testPool = new Pool(testConfig);
-      try {
-        const client = await testPool.connect();
-        client.release();
-        console.log(`[DB] Connection VALIDATED on ${ip}:${config.port}! Use this IP.`);
+  // 2. Build Candidate List (Priority: Target Port -> Fallback Port)
+  // We want to try ALL IPs on the main port first, then ALL IPs on the fallback port.
+  const candidates = [];
 
-        await testPool.end(); // Close test pool
-
-        config.hostaddr = ip;
-        pool = new Pool(config);
-        pool.on('error', (err) => console.error('[DB] Unexpected error on idle client', err));
-        return pool;
-      } catch (err) {
-        console.warn(`[DB] Failed to connect to ${ip}:${config.port}: ${err.message}`);
-        await testPool.end();
-        // Continue to next IP
-      }
+  if (resolvedIPs.length > 0) {
+    // Priority 1: Primary Port (usually 6543)
+    for (const ip of resolvedIPs) {
+      candidates.push({ ip, port: defaultPort });
     }
-    console.error('[DB] All resolve IPs failed. Falling back to first candidate.');
-    config.hostaddr = candidateIPs[0];
+    // Priority 2: Fallback Port (usually 5432 - Session Pooler)
+    for (const ip of resolvedIPs) {
+      candidates.push({ ip, port: fallbackPort });
+    }
   } else {
-    // No IPs found, use default hostname
-    console.log('[DB] Using hostname resolution (no explicit IPv4 lists).');
+    // Fallback if DNS fails: Just try the hostname with default port
+    candidates.push({ host: process.env.PGHOST, port: defaultPort });
   }
 
-  pool = new Pool(config);
-  pool.on('error', (err) => {
-    console.error('[DB] Unexpected error on idle client', err);
-  });
+  // 3. Race/Failover Logic
+  for (const candidate of candidates) {
+    const targetDesc = candidate.host ? candidate.host : candidate.ip;
+    console.log(`[DB] Testing connection to ${targetDesc} on PORT ${candidate.port}...`);
 
-  return pool;
+    const testConfig = {
+      ...config,
+      port: candidate.port,
+    };
+    if (candidate.ip) testConfig.hostaddr = candidate.ip;
+    if (candidate.host) testConfig.host = candidate.host;
+
+    const testPool = new Pool(testConfig);
+    try {
+      const client = await testPool.connect();
+      client.release();
+      console.log(`[DB] Connection VALIDATED on ${targetDesc}:${candidate.port}! Locking in.`);
+
+      await testPool.end(); // Close test pool
+
+      // Upgrade to real pool (Patient settings)
+      const finalConfig = {
+        ...testConfig,
+        connectionTimeoutMillis: 10000, // 10s for real queries
+      };
+
+      pool = new Pool(finalConfig);
+      pool.on('error', (err) => console.error('[DB] Unexpected error on idle client', err));
+      return pool;
+    } catch (err) {
+      console.warn(`[DB] Failed to connect to ${targetDesc}:${candidate.port}: ${err.message}`);
+      await testPool.end();
+      // Continue loop
+    }
+  }
+
+  console.error('[DB] All connection candidates failed.');
+  throw new Error('Could not connect to any DB candidate.');
 };
 
 const query = async (text, params = []) => {
@@ -110,6 +114,11 @@ const query = async (text, params = []) => {
       if (retries < maxRetries) {
         retries++;
         console.error(`[DB] Query failed, retrying (${retries}/${maxRetries})...`, err.message);
+        // If we fail on an existing pool, we might want to kill it to force re-selection
+        if (pool) {
+          try { await pool.end(); } catch (e) { }
+          pool = null;
+        }
         await new Promise(res => setTimeout(res, 2000));
       } else {
         throw err;
