@@ -11,6 +11,7 @@ const getPool = async () => {
 
   const defaultPort = Number(process.env.PGPORT || 6543);
   const fallbackPort = defaultPort === 6543 ? 5432 : 6543;
+  const projectHost = 'db.bqldotdtsodmfmnxwavl.supabase.co'; // Hardcoded fallback based on project ID
 
   const config = {
     // Default config (will be overridden per candidate)
@@ -18,14 +19,14 @@ const getPool = async () => {
     user: process.env.PGUSER,
     password: process.env.PGPASSWORD,
     ssl: process.env.PGSSLMODE === 'disable' ? false : { rejectUnauthorized: false },
-    connectionTimeoutMillis: 5000, // Fast 5s timeout for testing candidates
+    connectionTimeoutMillis: 5000,
     idleTimeoutMillis: 30000,
     max: 4,
   };
 
   let resolvedIPs = [];
 
-  // 1. Resolve IPs
+  // 1. Resolve IPs for the Env Var Host (Pooler)
   if (process.env.PGHOSTADDR) {
     console.log(`[DB] Using manual PGHOSTADDR: ${process.env.PGHOSTADDR}`);
     resolvedIPs = [process.env.PGHOSTADDR];
@@ -34,38 +35,34 @@ const getPool = async () => {
       console.log(`[DB] Resolving DNS for ${process.env.PGHOST}...`);
       const addresses = await dns.resolve4(process.env.PGHOST);
       if (addresses && addresses.length > 0) {
-        console.log(`[DB] Resolved IPv4: ${addresses.join(', ')}`);
+        console.log(`[DB] Resolved IPv4 (Pooler): ${addresses.join(', ')}`);
         resolvedIPs = addresses;
       } else {
-        console.warn('[DB] No IPv4 addresses found.');
+        console.warn('[DB] No IPv4 addresses found for Pooler.');
       }
     } catch (err) {
-      console.error('[DB] DNS Resolution failed:', err.message);
+      console.error('[DB] DNS Resolution failed (Pooler):', err.message);
     }
   }
 
-  // 2. Build Candidate List (Priority: Target Port -> Fallback Port)
-  // We want to try ALL IPs on the main port first, then ALL IPs on the fallback port.
   const candidates = [];
 
+  // Group A: Pooler IPs
   if (resolvedIPs.length > 0) {
-    // Priority 1: Primary Port (usually 6543)
-    for (const ip of resolvedIPs) {
-      candidates.push({ ip, port: defaultPort });
-    }
-    // Priority 2: Fallback Port (usually 5432 - Session Pooler)
-    for (const ip of resolvedIPs) {
-      candidates.push({ ip, port: fallbackPort });
-    }
+    for (const ip of resolvedIPs) candidates.push({ ip, port: defaultPort, label: 'Pooler IP' });
+    for (const ip of resolvedIPs) candidates.push({ ip, port: fallbackPort, label: 'Pooler IP' });
   } else {
-    // Fallback if DNS fails: Just try the hostname with default port
-    candidates.push({ host: process.env.PGHOST, port: defaultPort });
+    candidates.push({ host: process.env.PGHOST, port: defaultPort, label: 'Pooler Hostname' });
   }
+
+  // Group B: Direct Host Fallback (Bypass Pooler)
+  // This is the "Nuclear Option" - connect directly to the DB instance URL
+  candidates.push({ host: projectHost, port: 5432, label: 'DIRECT DB HOST' });
 
   // 3. Race/Failover Logic
   for (const candidate of candidates) {
     const targetDesc = candidate.host ? candidate.host : candidate.ip;
-    console.log(`[DB] Testing connection to ${targetDesc} on PORT ${candidate.port}...`);
+    console.log(`[DB] Testing connection to [${candidate.label}] ${targetDesc} on PORT ${candidate.port}...`);
 
     const testConfig = {
       ...config,
@@ -73,6 +70,10 @@ const getPool = async () => {
     };
     if (candidate.ip) testConfig.hostaddr = candidate.ip;
     if (candidate.host) testConfig.host = candidate.host;
+
+    // IMPORTANT: For Direct Host, the "user" might need to be just 'postgres' if the pooled user fails,
+    // but usually the pooled user works on direct connections too (just without pooling benefits).
+    // usage of 'postgres' user requires administrative password which we likely have in PGPASSWORD.
 
     const testPool = new Pool(testConfig);
     try {
