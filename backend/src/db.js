@@ -15,14 +15,14 @@ const getPool = async () => {
     user: process.env.PGUSER,
     password: process.env.PGPASSWORD,
     ssl: process.env.PGSSLMODE === 'disable' ? false : { rejectUnauthorized: false },
-    connectionTimeoutMillis: 10000, // 10s timeout per attempt (fail fast if IP is bad)
+    connectionTimeoutMillis: 10000, // 10s timeout per attempt
     idleTimeoutMillis: 30000,       // Keep idle connections for 30s
     max: 4,
   };
 
   let candidateIPs = [];
 
-  // 1. Determine IPs to try
+  // 1. Determine IPs to try (Dual Stack: IPv4 + IPv6)
   if (process.env.PGHOSTADDR) {
     console.log(`[DB] Using manual PGHOSTADDR: ${process.env.PGHOSTADDR}`);
     candidateIPs = [process.env.PGHOSTADDR];
@@ -30,13 +30,26 @@ const getPool = async () => {
   } else {
     try {
       console.log(`[DB] Resolving DNS for ${process.env.PGHOST}...`);
-      const addresses = await dns.resolve4(process.env.PGHOST);
-      if (addresses && addresses.length > 0) {
-        console.log(`[DB] Resolved to IPs: ${addresses.join(', ')}`);
-        candidateIPs = addresses;
+
+      const [ipv4, ipv6] = await Promise.allSettled([
+        dns.resolve4(process.env.PGHOST),
+        dns.resolve6(process.env.PGHOST)
+      ]);
+
+      if (ipv4.status === 'fulfilled' && ipv4.value.length > 0) {
+        console.log(`[DB] IPv4 Candidates: ${ipv4.value.join(', ')}`);
+        candidateIPs.push(...ipv4.value);
+      }
+
+      if (ipv6.status === 'fulfilled' && ipv6.value.length > 0) {
+        console.log(`[DB] IPv6 Candidates: ${ipv6.value.join(', ')}`);
+        candidateIPs.push(...ipv6.value);
+      }
+
+      if (candidateIPs.length > 0) {
         config.host = process.env.PGHOST;
       } else {
-        console.warn('[DB] No IPv4 addresses found, falling back to default hostname.');
+        console.warn('[DB] No IPs found, falling back to default hostname.');
         candidateIPs = [];
         config.host = process.env.PGHOST;
       }
@@ -51,7 +64,7 @@ const getPool = async () => {
   if (candidateIPs.length > 0) {
     for (const ip of candidateIPs) {
       console.log(`[DB] Testing connection to ${ip} on PORT ${config.port}...`);
-      const testConfig = { ...config, hostaddr: ip, connectionTimeoutMillis: 10000 }; // 10s test timeout
+      const testConfig = { ...config, hostaddr: ip, connectionTimeoutMillis: 10000 };
       const testPool = new Pool(testConfig);
       try {
         const client = await testPool.connect();
@@ -74,7 +87,7 @@ const getPool = async () => {
     config.hostaddr = candidateIPs[0];
   } else {
     // No IPs found, use default hostname
-    console.log('[DB] Using hostname resolution (no explicit IPv4 list).');
+    console.log('[DB] Using hostname resolution (no explicit IPv4 lists).');
   }
 
   pool = new Pool(config);
