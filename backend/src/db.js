@@ -50,13 +50,13 @@ const getPool = async () => {
   // 2. Race/Failover Logic: Find the FIRST working IP
   if (candidateIPs.length > 0) {
     for (const ip of candidateIPs) {
-      console.log(`[DB] Testing connection to ${ip}...`);
-      const testConfig = { ...config, hostaddr: ip, connectionTimeoutMillis: 5000 }; // 5s test timeout
+      console.log(`[DB] Testing connection to ${ip} on PORT ${config.port}...`);
+      const testConfig = { ...config, hostaddr: ip, connectionTimeoutMillis: 10000 }; // 10s test timeout
       const testPool = new Pool(testConfig);
       try {
         const client = await testPool.connect();
         client.release();
-        console.log(`[DB] Connection VALIDATED on ${ip}! Use this IP.`);
+        console.log(`[DB] Connection VALIDATED on ${ip}:${config.port}! Use this IP.`);
 
         await testPool.end(); // Close test pool
 
@@ -65,7 +65,7 @@ const getPool = async () => {
         pool.on('error', (err) => console.error('[DB] Unexpected error on idle client', err));
         return pool;
       } catch (err) {
-        console.warn(`[DB] Failed to connect to ${ip}: ${err.message}`);
+        console.warn(`[DB] Failed to connect to ${ip}:${config.port}: ${err.message}`);
         await testPool.end();
         // Continue to next IP
       }
