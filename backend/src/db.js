@@ -15,8 +15,22 @@ const pool = new Pool({
 });
 
 const query = async (text, params = []) => {
-  const result = await pool.query(text, params);
-  return result;
+  let retries = 0;
+  const maxRetries = 3;
+  while (true) {
+    try {
+      const result = await pool.query(text, params);
+      return result;
+    } catch (err) {
+      if (retries < maxRetries) {
+        retries++;
+        console.error(`Query failed, retrying (${retries}/${maxRetries})...`, err.message);
+        await new Promise(res => setTimeout(res, 1000)); // wait 1s
+      } else {
+        throw err;
+      }
+    }
+  }
 };
 
 const normalizeProgram = (programRaw = '') => {
