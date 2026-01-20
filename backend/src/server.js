@@ -157,11 +157,16 @@ app.get('/', (_req, res) => {
 });
 
 const start = async () => {
+  app.listen(PORT, () => {
+    console.log(`API running on http://localhost:${PORT}`);
+  });
+
   let dbReady = false;
   while (!dbReady) {
     try {
       await initDb();
       dbReady = true;
+      console.log('Database initialized successfully');
     } catch (err) {
       console.error('Failed to connect to DB, retrying in 10s...', err.message);
       await new Promise(res => setTimeout(res, 10000));
@@ -174,10 +179,6 @@ const start = async () => {
   } catch (err) {
     console.error('Offer backfill skipped:', err.message);
   }
-
-  app.listen(PORT, () => {
-    console.log(`API running on http://localhost:${PORT}`);
-  });
 };
 
 start();
