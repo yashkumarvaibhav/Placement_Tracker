@@ -412,6 +412,157 @@ const App = () => {
   const [showStudentModal, setShowStudentModal] = useState(false);
   const [editStudent, setEditStudent] = useState(null);
 
+  // Companies page: search, sort, filter, detail
+  const [companySearch, setCompanySearch] = useState('');
+  const [companySort, setCompanySort] = useState({ field: 'name', asc: true });
+  const [companyFilters, setCompanyFilters] = useState({ type: '', category: '' });
+  const [selectedCompany, setSelectedCompany] = useState(null);
+
+  // Students page: search, sort, filter
+  const [studentSearch, setStudentSearch] = useState('');
+  const [studentSort, setStudentSort] = useState({ field: 'roll_number', asc: true });
+  const [studentFilters, setStudentFilters] = useState({ program: '', status: '', offerType: '' });
+
+  // Compute hiring stats per company from students data
+  const companyHiringStats = useMemo(() => {
+    const stats = {};
+    students.forEach((s) => {
+      (s.offers || []).forEach((o) => {
+        const cid = o.company_id;
+        if (!cid) return;
+        if (!stats[cid]) stats[cid] = { total: 0, CSE: 0, 'CSE-R': 0, ECE: 0, CB: 0, students: [] };
+        stats[cid].total++;
+        if (stats[cid][s.program] !== undefined) stats[cid][s.program]++;
+        stats[cid].students.push({ name: s.name, roll: s.roll_number, program: s.program });
+      });
+    });
+    return stats;
+  }, [students]);
+
+  // Filtered and sorted companies
+  const filteredCompanies = useMemo(() => {
+    let result = [...companies];
+    // Search
+    if (companySearch.trim()) {
+      const q = companySearch.toLowerCase();
+      result = result.filter((c) => c.name?.toLowerCase().includes(q));
+    }
+    // Filter by type
+    if (companyFilters.type) {
+      result = result.filter((c) => c.type === companyFilters.type);
+    }
+    // Filter by category
+    if (companyFilters.category) {
+      result = result.filter((c) => (c.category || '').toUpperCase() === companyFilters.category.toUpperCase());
+    }
+    // Sort
+    const { field, asc } = companySort;
+    result.sort((a, b) => {
+      let av, bv;
+      if (field === 'totalHired') {
+        av = companyHiringStats[a.id]?.total || 0;
+        bv = companyHiringStats[b.id]?.total || 0;
+      } else if (field === 'cseHired') {
+        av = (companyHiringStats[a.id]?.CSE || 0) + (companyHiringStats[a.id]?.['CSE-R'] || 0);
+        bv = (companyHiringStats[b.id]?.CSE || 0) + (companyHiringStats[b.id]?.['CSE-R'] || 0);
+      } else if (field === 'eceHired') {
+        av = companyHiringStats[a.id]?.ECE || 0;
+        bv = companyHiringStats[b.id]?.ECE || 0;
+      } else if (field === 'cbHired') {
+        av = companyHiringStats[a.id]?.CB || 0;
+        bv = companyHiringStats[b.id]?.CB || 0;
+      } else if (field === 'ctc' || field === 'stipend') {
+        av = a[field] ?? -Infinity;
+        bv = b[field] ?? -Infinity;
+      } else if (field === 'offer_date') {
+        av = a.offer_date ? new Date(a.offer_date).getTime() : 0;
+        bv = b.offer_date ? new Date(b.offer_date).getTime() : 0;
+      } else {
+        av = (a[field] || '').toString().toLowerCase();
+        bv = (b[field] || '').toString().toLowerCase();
+      }
+      if (av < bv) return asc ? -1 : 1;
+      if (av > bv) return asc ? 1 : -1;
+      return 0;
+    });
+    return result;
+  }, [companies, companySearch, companyFilters, companySort, companyHiringStats]);
+
+  // Filtered and sorted students
+  const filteredStudents = useMemo(() => {
+    let result = [...students];
+    // Search by name or roll
+    if (studentSearch.trim()) {
+      const q = studentSearch.toLowerCase();
+      result = result.filter((s) => s.name?.toLowerCase().includes(q) || s.roll_number?.toLowerCase().includes(q));
+    }
+    // Filter by program
+    if (studentFilters.program) {
+      result = result.filter((s) => s.program === studentFilters.program);
+    }
+    // Filter by status
+    if (studentFilters.status) {
+      result = result.filter((s) => s.placement_status === studentFilters.status);
+    }
+    // Filter by offer type
+    if (studentFilters.offerType) {
+      result = result.filter((s) => {
+        if (s.offers?.length) {
+          return s.offers.some((o) => o.offer_type === studentFilters.offerType);
+        }
+        return s.offer_type === studentFilters.offerType;
+      });
+    }
+    // Sort
+    const { field, asc } = studentSort;
+    result.sort((a, b) => {
+      let av, bv;
+      if (field === 'ctc' || field === 'stipend') {
+        // Use max from offers or direct value
+        const getVal = (s, f) => {
+          if (s.offers?.length) {
+            const vals = s.offers.map((o) => o[f] ?? o[`company_${f}`]).filter(Boolean);
+            return vals.length ? Math.max(...vals) : -Infinity;
+          }
+          return s[f] ?? s[`company_${f}`] ?? -Infinity;
+        };
+        av = getVal(a, field);
+        bv = getVal(b, field);
+      } else if (field === 'offer_date') {
+        const getDate = (s) => {
+          if (s.offers?.length) {
+            const dates = s.offers.map((o) => o.offer_date || o.company_offer_date).filter(Boolean).map((d) => new Date(d).getTime());
+            return dates.length ? Math.max(...dates) : 0;
+          }
+          return s.offer_date ? new Date(s.offer_date).getTime() : 0;
+        };
+        av = getDate(a);
+        bv = getDate(b);
+      } else {
+        av = (a[field] || '').toString().toLowerCase();
+        bv = (b[field] || '').toString().toLowerCase();
+      }
+      if (av < bv) return asc ? -1 : 1;
+      if (av > bv) return asc ? 1 : -1;
+      return 0;
+    });
+    return result;
+  }, [students, studentSearch, studentFilters, studentSort]);
+
+  // Toggle sort handler
+  const toggleSort = (setter, current, field) => {
+    if (current.field === field) {
+      setter({ field, asc: !current.asc });
+    } else {
+      setter({ field, asc: true });
+    }
+  };
+
+  const SortIcon = ({ field, current }) => {
+    const active = current.field === field;
+    return <span className="sort-icon">{active ? (current.asc ? '▲' : '▼') : '⇅'}</span>;
+  };
+
   const refresh = async () => {
     const initial = isInitialLoad.current;
     if (initial) setLoading(true);
@@ -675,22 +826,72 @@ const App = () => {
                   <button onClick={() => { setEditCompany(null); setShowCompanyModal(true); }}>Add Company</button>
                 )}
               </div>
-              <div className="card">
+
+              {/* Toolbar: Search, Sort, Filters */}
+              <div className="toolbar">
+                <input
+                  type="text"
+                  className="search-input"
+                  placeholder="Search company..."
+                  value={companySearch}
+                  onChange={(e) => setCompanySearch(e.target.value)}
+                />
+                <div className="filter-group">
+                  <label>Type:</label>
+                  <select value={companyFilters.type} onChange={(e) => setCompanyFilters((f) => ({ ...f, type: e.target.value }))}>
+                    <option value="">All</option>
+                    <option value="Intern">Intern</option>
+                    <option value="FTE">FTE</option>
+                    <option value="Intern+FTE">Intern+FTE</option>
+                  </select>
+                </div>
+                <div className="filter-group">
+                  <label>Category:</label>
+                  <select value={companyFilters.category} onChange={(e) => setCompanyFilters((f) => ({ ...f, category: e.target.value }))}>
+                    <option value="">All</option>
+                    <option value="A+">A+</option>
+                    <option value="A">A</option>
+                    <option value="B">B</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="card" style={{ overflowX: 'auto' }}>
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>Name</th>
+                      <th className={`sortable ${companySort.field === 'name' ? 'sorted' : ''}`} onClick={() => toggleSort(setCompanySort, companySort, 'name')}>
+                        Name <SortIcon field="name" current={companySort} />
+                      </th>
                       <th>Role</th>
                       <th>Type</th>
                       <th>Category</th>
-                      <th>CTC</th>
-                      <th>Stipend</th>
-                      <th>Date of Offer</th>
+                      <th className={`sortable ${companySort.field === 'ctc' ? 'sorted' : ''}`} onClick={() => toggleSort(setCompanySort, companySort, 'ctc')}>
+                        CTC <SortIcon field="ctc" current={companySort} />
+                      </th>
+                      <th className={`sortable ${companySort.field === 'stipend' ? 'sorted' : ''}`} onClick={() => toggleSort(setCompanySort, companySort, 'stipend')}>
+                        Stipend <SortIcon field="stipend" current={companySort} />
+                      </th>
+                      <th className={`sortable ${companySort.field === 'offer_date' ? 'sorted' : ''}`} onClick={() => toggleSort(setCompanySort, companySort, 'offer_date')}>
+                        Date <SortIcon field="offer_date" current={companySort} />
+                      </th>
+                      <th className={`sortable ${companySort.field === 'totalHired' ? 'sorted' : ''}`} onClick={() => toggleSort(setCompanySort, companySort, 'totalHired')}>
+                        Total <SortIcon field="totalHired" current={companySort} />
+                      </th>
+                      <th className={`sortable ${companySort.field === 'cseHired' ? 'sorted' : ''}`} onClick={() => toggleSort(setCompanySort, companySort, 'cseHired')}>
+                        CSE <SortIcon field="cseHired" current={companySort} />
+                      </th>
+                      <th className={`sortable ${companySort.field === 'eceHired' ? 'sorted' : ''}`} onClick={() => toggleSort(setCompanySort, companySort, 'eceHired')}>
+                        ECE <SortIcon field="eceHired" current={companySort} />
+                      </th>
+                      <th className={`sortable ${companySort.field === 'cbHired' ? 'sorted' : ''}`} onClick={() => toggleSort(setCompanySort, companySort, 'cbHired')}>
+                        CB <SortIcon field="cbHired" current={companySort} />
+                      </th>
                       <th></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {companies.map((c) => {
+                    {filteredCompanies.map((c) => {
                       const cat = (c.category || '').toUpperCase();
                       const rowStyle = cat === 'A+'
                         ? { backgroundColor: '#ecfeff' }
@@ -699,15 +900,28 @@ const App = () => {
                           : cat === 'B'
                             ? { backgroundColor: '#fef2f2' }
                             : {};
+                      const stats = companyHiringStats[c.id] || { total: 0, CSE: 0, 'CSE-R': 0, ECE: 0, CB: 0 };
                       return (
                         <tr key={c.id} style={rowStyle}>
-                          <td>{c.name}</td>
+                          <td>
+                            <button
+                              className="secondary"
+                              style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 500 }}
+                              onClick={() => setSelectedCompany(c)}
+                            >
+                              {c.name}
+                            </button>
+                          </td>
                           <td>{c.role}</td>
                           <td><span className="chip">{c.type || '—'}</span></td>
                           <td>{c.category || '—'}</td>
                           <td>{c.ctc ?? '—'}</td>
                           <td>{c.stipend ?? '—'}</td>
                           <td>{formatDate(c.offer_date)}</td>
+                          <td style={{ fontWeight: 600 }}>{stats.total}</td>
+                          <td>{stats.CSE + (stats['CSE-R'] || 0)}</td>
+                          <td>{stats.ECE}</td>
+                          <td>{stats.CB}</td>
                           <td>
                             {isAdmin && (
                               <div className="flex-row">
@@ -723,6 +937,7 @@ const App = () => {
                 </table>
               </div>
 
+              {/* Add/Edit Company Modal */}
               <Modal open={showCompanyModal} onClose={() => setShowCompanyModal(false)}>
                 <h3>{editCompany ? 'Edit Company' : 'Add Company'}</h3>
                 <CompanyForm
@@ -730,6 +945,102 @@ const App = () => {
                   onSubmit={saveCompany}
                   onCancel={() => setShowCompanyModal(false)}
                 />
+              </Modal>
+
+              {/* Company Detail Modal */}
+              <Modal open={!!selectedCompany} onClose={() => setSelectedCompany(null)}>
+                {selectedCompany && (() => {
+                  const stats = companyHiringStats[selectedCompany.id] || { total: 0, CSE: 0, 'CSE-R': 0, ECE: 0, CB: 0, students: [] };
+                  return (
+                    <div className="company-detail">
+                      <h3>{selectedCompany.name}</h3>
+                      <div className="info-grid">
+                        <div className="info-item">
+                          <div className="label">Role</div>
+                          <div className="value">{selectedCompany.role || '—'}</div>
+                        </div>
+                        <div className="info-item">
+                          <div className="label">Type</div>
+                          <div className="value">{selectedCompany.type || '—'}</div>
+                        </div>
+                        <div className="info-item">
+                          <div className="label">Category</div>
+                          <div className="value">{selectedCompany.category || '—'}</div>
+                        </div>
+                        <div className="info-item">
+                          <div className="label">CTC (LPA)</div>
+                          <div className="value">{selectedCompany.ctc ?? '—'}</div>
+                        </div>
+                        <div className="info-item">
+                          <div className="label">Stipend</div>
+                          <div className="value">{selectedCompany.stipend ?? '—'}</div>
+                        </div>
+                        <div className="info-item">
+                          <div className="label">Eligible CGPA</div>
+                          <div className="value">{selectedCompany.eligible_cgpa ?? '—'}</div>
+                        </div>
+                        <div className="info-item">
+                          <div className="label">Backlog Allowed</div>
+                          <div className="value">{selectedCompany.backlog_allowed ? 'Yes' : 'No'}</div>
+                        </div>
+                        <div className="info-item">
+                          <div className="label">Registration Deadline</div>
+                          <div className="value">{formatDate(selectedCompany.registration_deadline)}</div>
+                        </div>
+                        <div className="info-item">
+                          <div className="label">Date of Offer</div>
+                          <div className="value">{formatDate(selectedCompany.offer_date)}</div>
+                        </div>
+                      </div>
+
+                      <h4 style={{ marginTop: 16, marginBottom: 8 }}>Hiring Statistics</h4>
+                      <div className="hiring-stats">
+                        <div className="hiring-stat">
+                          <div className="count">{stats.total}</div>
+                          <div className="label">Total Hired</div>
+                        </div>
+                        <div className="hiring-stat">
+                          <div className="count">{stats.CSE + (stats['CSE-R'] || 0)}</div>
+                          <div className="label">CSE</div>
+                        </div>
+                        <div className="hiring-stat">
+                          <div className="count">{stats.ECE}</div>
+                          <div className="label">ECE</div>
+                        </div>
+                        <div className="hiring-stat">
+                          <div className="count">{stats.CB}</div>
+                          <div className="label">CB</div>
+                        </div>
+                      </div>
+
+                      {stats.students.length > 0 && (
+                        <>
+                          <h4 style={{ marginTop: 16, marginBottom: 8 }}>Hired Students</h4>
+                          <div className="hired-students-list">
+                            <table className="table">
+                              <thead>
+                                <tr>
+                                  <th>Roll</th>
+                                  <th>Name</th>
+                                  <th>Program</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {stats.students.map((st, idx) => (
+                                  <tr key={idx}>
+                                    <td>{st.roll}</td>
+                                    <td>{st.name}</td>
+                                    <td>{st.program}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
               </Modal>
             </div>
           )}
@@ -745,24 +1056,73 @@ const App = () => {
                   <button onClick={() => { setEditStudent(null); setShowStudentModal(true); }}>Add Student</button>
                 )}
               </div>
+
+              {/* Toolbar: Search, Sort, Filters */}
+              <div className="toolbar">
+                <input
+                  type="text"
+                  className="search-input"
+                  placeholder="Search name or roll..."
+                  value={studentSearch}
+                  onChange={(e) => setStudentSearch(e.target.value)}
+                />
+                <div className="filter-group">
+                  <label>Program:</label>
+                  <select value={studentFilters.program} onChange={(e) => setStudentFilters((f) => ({ ...f, program: e.target.value }))}>
+                    <option value="">All</option>
+                    <option value="CSE">CSE</option>
+                    <option value="CSE-R">CSE-R</option>
+                    <option value="ECE">ECE</option>
+                    <option value="CB">CB</option>
+                  </select>
+                </div>
+                <div className="filter-group">
+                  <label>Status:</label>
+                  <select value={studentFilters.status} onChange={(e) => setStudentFilters((f) => ({ ...f, status: e.target.value }))}>
+                    <option value="">All</option>
+                    <option value="Placed">Placed</option>
+                    <option value="Unplaced">Unplaced</option>
+                  </select>
+                </div>
+                <div className="filter-group">
+                  <label>Offer:</label>
+                  <select value={studentFilters.offerType} onChange={(e) => setStudentFilters((f) => ({ ...f, offerType: e.target.value }))}>
+                    <option value="">All</option>
+                    <option value="Intern">Intern</option>
+                    <option value="FTE">FTE</option>
+                    <option value="Intern+FTE">Intern+FTE</option>
+                  </select>
+                </div>
+              </div>
+
               <div className="card" style={{ overflowX: 'auto' }}>
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>Roll</th>
-                      <th>Name</th>
+                      <th className={`sortable ${studentSort.field === 'roll_number' ? 'sorted' : ''}`} onClick={() => toggleSort(setStudentSort, studentSort, 'roll_number')}>
+                        Roll <SortIcon field="roll_number" current={studentSort} />
+                      </th>
+                      <th className={`sortable ${studentSort.field === 'name' ? 'sorted' : ''}`} onClick={() => toggleSort(setStudentSort, studentSort, 'name')}>
+                        Name <SortIcon field="name" current={studentSort} />
+                      </th>
                       <th>Program</th>
                       <th>Status</th>
                       <th>Companies</th>
                       <th>Offer Types</th>
-                      <th>CTC</th>
-                      <th>Stipend</th>
-                      <th>Date of Offer</th>
+                      <th className={`sortable ${studentSort.field === 'ctc' ? 'sorted' : ''}`} onClick={() => toggleSort(setStudentSort, studentSort, 'ctc')}>
+                        CTC <SortIcon field="ctc" current={studentSort} />
+                      </th>
+                      <th className={`sortable ${studentSort.field === 'stipend' ? 'sorted' : ''}`} onClick={() => toggleSort(setStudentSort, studentSort, 'stipend')}>
+                        Stipend <SortIcon field="stipend" current={studentSort} />
+                      </th>
+                      <th className={`sortable ${studentSort.field === 'offer_date' ? 'sorted' : ''}`} onClick={() => toggleSort(setStudentSort, studentSort, 'offer_date')}>
+                        Date <SortIcon field="offer_date" current={studentSort} />
+                      </th>
                       <th></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {students.map((s) => {
+                    {filteredStudents.map((s) => {
                       const isPlaced = s.placement_status === 'Placed';
                       const rowStyle = isPlaced ? { backgroundColor: '#f0fdf4' } : { backgroundColor: '#fef2f2' };
                       const offerDates = s.offers?.length

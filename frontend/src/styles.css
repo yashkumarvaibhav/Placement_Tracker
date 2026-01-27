@@ -249,6 +249,134 @@ form {
   overflow-y: auto;
 }
 
+/* Toolbar for search, sort, filter */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.toolbar .search-input {
+  flex: 1;
+  min-width: 200px;
+  max-width: 300px;
+  padding: 8px 12px 8px 36px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23666' viewBox='0 0 16 16'%3E%3Cpath d='M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: 10px center;
+}
+
+.toolbar select {
+  min-width: 120px;
+  padding: 8px 12px;
+}
+
+.toolbar label {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Sortable table headers */
+.table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.table th.sortable:hover {
+  background: rgba(63, 173, 168, 0.1);
+}
+
+.table th .sort-icon {
+  margin-left: 4px;
+  opacity: 0.4;
+  font-size: 10px;
+}
+
+.table th.sorted .sort-icon {
+  opacity: 1;
+  color: var(--accent);
+}
+
+/* Company detail modal */
+.company-detail {
+  display: grid;
+  gap: 16px;
+}
+
+.company-detail .info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.company-detail .info-item {
+  padding: 10px;
+  background: #f9f9f9;
+  border-radius: 8px;
+}
+
+.company-detail .info-item .label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.company-detail .info-item .value {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.hiring-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.hiring-stat {
+  text-align: center;
+  padding: 12px;
+  background: linear-gradient(135deg, rgba(63, 173, 168, 0.1), rgba(255, 255, 255, 0.9));
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+
+.hiring-stat .count {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.hiring-stat .label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.hired-students-list {
+  max-height: 200px;
+  overflow-y: auto;
+  margin-top: 8px;
+}
+
+.hired-students-list table {
+  width: 100%;
+  font-size: 13px;
+}
+
 @media (max-width: 700px) {
   .navbar { padding: 12px 16px; }
   .container { padding: 16px; }
