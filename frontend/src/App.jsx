@@ -900,22 +900,30 @@ const App = () => {
   return (
     <>
       <header>
-        <div className="navbar" style={{ padding: '16px 24px', gap: 20 }}>
-          <div className="flex-row nav-logo" style={{ alignItems: 'center' }}>
-            <img src={`${assetBase}iiitd_logo.png`} alt="IIIT Delhi logo" />
+        <div className="navbar">
+          <div className="nav-brand-row">
+            <div className="flex-row nav-logo" style={{ alignItems: 'center' }}>
+              <img src={`${assetBase}iiitd_logo.png`} alt="IIIT Delhi logo" />
+            </div>
+            <span className="badge nav-batch-badge">{activeBatch.label}</span>
           </div>
-          <div className="flex-row nav-links" style={{ alignItems: 'center', gap: 16 }}>
+
+          <div className="nav-main-links">
             <Link to="/">Dashboard</Link>
             <Link to="/companies">Companies</Link>
             <Link to="/students">Students</Link>
-            <span className="badge">{activeBatch.label}</span>
-            {googleEmail && <span className="subtext">{googleEmail}</span>}
-            <button className="secondary" onClick={handleGoogleLogout}>Sign out</button>
+          </div>
+
+          <div className="nav-user-row">
+            {googleEmail && <span className="subtext nav-user-email">{googleEmail}</span>}
+            <div className="nav-actions">
+              <button className="secondary" onClick={handleGoogleLogout}>Sign out</button>
             {isAdmin ? (
-              <button className="secondary" onClick={() => { setToken(''); localStorage.removeItem('adminToken'); navigate('/'); }}>Logout</button>
+                <button className="secondary" onClick={() => { setToken(''); localStorage.removeItem('adminToken'); navigate('/'); }}>Logout</button>
             ) : (
-              <Link to="/admin">Admin Login</Link>
+                <Link className="nav-admin-link" to="/admin">Admin Login</Link>
             )}
+            </div>
           </div>
         </div>
       </header>
@@ -941,32 +949,29 @@ const App = () => {
               <div
                 className="hero"
                 style={{
-                  backgroundImage: `linear-gradient(90deg, rgba(63,173,168,0.3), rgba(255,255,255,0.85)), url(${assetBase}institute18-3.jpg)`,
-                  backgroundSize: 'cover',
-                  backgroundPosition: 'center',
-                  gridTemplateColumns: '1.5fr 1fr',
+                  backgroundImage: `url(${assetBase}institute18-3.jpg)`,
                 }}
               >
-                <div>
-                  <div className="badge" style={{ display: 'inline-block', marginBottom: 10 }}>Selected Cohort</div>
-                  <h1 style={{ margin: '4px 0 6px' }}>Placement Data for {activeBatch.label} Passout Batch</h1>
-                  <p className="subtext" style={{ marginTop: 0, maxWidth: 720 }}>
+                <div className="hero-copy">
+                  <div className="badge hero-badge">Selected Cohort</div>
+                  <h1>Placement Data for {activeBatch.label} Passout Batch</h1>
+                  <p className="subtext hero-subtext">
                     Dashboard defaults to M.Tech 2027. Use the branch filter in the overall section to narrow the actual programs shown for the selected batch.
                   </p>
-                  {error && <p style={{ color: '#dc2626' }}>{error}</p>}
+                  {error && <p className="hero-error">{error}</p>}
                 </div>
-                <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px,1fr))', alignItems: 'stretch' }}>
-                  <div className="card" style={{ textAlign: 'center', background: 'rgba(255,255,255,0.9)' }}>
+                <div className="grid hero-stats">
+                  <div className="card hero-stat-card">
                     <div className="stat-label"><MetricLabel metricKey="number_of_companies">Total Companies</MetricLabel></div>
-                    <div className="stat-value" style={{ fontSize: 30 }}>{stats.number_of_companies ?? '—'}</div>
+                    <div className="stat-value hero-stat-value">{stats.number_of_companies ?? '—'}</div>
                   </div>
-                  <div className="card" style={{ textAlign: 'center', background: 'rgba(255,255,255,0.9)' }}>
+                  <div className="card hero-stat-card">
                     <div className="stat-label"><MetricLabel metricKey="total_offers">Total Offers</MetricLabel></div>
-                    <div className="stat-value" style={{ fontSize: 30 }}>{stats.total_offers ?? '—'}</div>
+                    <div className="stat-value hero-stat-value">{stats.total_offers ?? '—'}</div>
                   </div>
-                  <div className="card" style={{ textAlign: 'center', background: 'rgba(255,255,255,0.9)' }}>
+                  <div className="card hero-stat-card hero-stat-card--wide">
                     <div className="stat-label"><MetricLabel metricKey="overall_placement_percentage">Placement %</MetricLabel></div>
-                    <div className="stat-value" style={{ fontSize: 30 }}>{formatPct(stats.overall_placement_percentage)}</div>
+                    <div className="stat-value hero-stat-value">{formatPct(stats.overall_placement_percentage)}</div>
                   </div>
                 </div>
               </div>
