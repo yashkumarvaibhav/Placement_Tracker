@@ -31,6 +31,19 @@ const StatCard = ({ label, value }) => (
   </div>
 );
 
+const ThemeToggle = ({ themeMode, onToggle, compact = false }) => (
+  <button
+    type="button"
+    className={compact ? 'secondary theme-toggle theme-toggle-compact' : 'secondary theme-toggle'}
+    onClick={onToggle}
+    aria-label={`Switch to ${themeMode === 'light' ? 'dark' : 'light'} theme`}
+    title={`Switch to ${themeMode === 'light' ? 'dark' : 'light'} theme`}
+  >
+    <span className="theme-toggle-icon" aria-hidden="true">{themeMode === 'light' ? '◐' : '☼'}</span>
+    <span>{themeMode === 'light' ? 'Dark mode' : 'Light mode'}</span>
+  </button>
+);
+
 const InfoTip = ({ text }) => {
   if (!text) return null;
 
@@ -597,6 +610,7 @@ const App = () => {
   const [dashboardBranchFilter, setDashboardBranchFilter] = useState('ALL');
   const [mobileHeaderHidden, setMobileHeaderHidden] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [themeMode, setThemeMode] = useState(localStorage.getItem('themeMode') || 'light');
 
   useEffect(() => {
     localStorage.setItem('activeBatchKey', activeBatch.key);
@@ -613,6 +627,11 @@ const App = () => {
     setMobileNavOpen(false);
     setMobileHeaderHidden(false);
   }, [location.pathname]);
+
+  useEffect(() => {
+    localStorage.setItem('themeMode', themeMode);
+    document.documentElement.setAttribute('data-theme', themeMode);
+  }, [themeMode]);
 
   useEffect(() => {
     if (!isGoogleAuthed || typeof window === 'undefined') {
@@ -706,6 +725,10 @@ const App = () => {
 
   const closeMobileNav = () => {
     setMobileNavOpen(false);
+  };
+
+  const toggleThemeMode = () => {
+    setThemeMode((current) => (current === 'light' ? 'dark' : 'light'));
   };
 
   const availablePrograms = useMemo(
@@ -876,6 +899,44 @@ const App = () => {
     return result;
   }, [students, studentSearch, studentFilters, studentSort]);
 
+  const companyOverview = useMemo(() => {
+    const totals = filteredCompanies.reduce((summary, company) => {
+      const type = company.type || 'OTHER';
+      const category = (company.category || '').toUpperCase();
+      summary.hires += companyHiringStats[company.id]?.total || 0;
+      if (type === 'Intern') summary.intern += 1;
+      if (type === 'FTE') summary.fte += 1;
+      if (type === 'Intern+FTE') summary.combo += 1;
+      if (category === 'A+') summary.aplus += 1;
+      return summary;
+    }, { hires: 0, intern: 0, fte: 0, combo: 0, aplus: 0 });
+
+    return {
+      total: filteredCompanies.length,
+      trackedHires: totals.hires,
+      activeTypes: [totals.fte ? 'FTE' : null, totals.intern ? 'Intern' : null, totals.combo ? 'Hybrid' : null].filter(Boolean).join(' · ') || 'All company types',
+      spotlight: totals.aplus,
+    };
+  }, [filteredCompanies, companyHiringStats]);
+
+  const studentOverview = useMemo(() => {
+    const placed = filteredStudents.filter((student) => student.placement_status === 'Placed').length;
+    const internships = filteredStudents.filter((student) => {
+      if (student.offers?.length) {
+        return student.offers.some((offer) => offer.offer_type === 'Intern' || offer.offer_type === 'Intern+FTE');
+      }
+      return student.offer_type === 'Intern' || student.offer_type === 'Intern+FTE';
+    }).length;
+
+    return {
+      total: filteredStudents.length,
+      placed,
+      unplaced: Math.max(filteredStudents.length - placed, 0),
+      internships,
+      programs: new Set(filteredStudents.map((student) => student.program).filter(Boolean)).size,
+    };
+  }, [filteredStudents]);
+
   // Toggle sort handler
   const toggleSort = (setter, current, field) => {
     if (current.field === field) {
@@ -994,6 +1055,8 @@ const App = () => {
         onSuccess={handleGoogleSuccess}
         onError={handleGoogleError}
         error={loginError}
+        themeMode={themeMode}
+        onToggleTheme={toggleThemeMode}
       />
     );
   }
@@ -1035,6 +1098,7 @@ const App = () => {
           <div className="nav-user-row">
             {googleEmail && <span className="subtext nav-user-email">{googleEmail}</span>}
             <div className="nav-actions">
+              <ThemeToggle themeMode={themeMode} onToggle={toggleThemeMode} compact />
               <button className="secondary" onClick={() => { closeMobileNav(); handleGoogleLogout(); }}>Sign out</button>
               {isAdmin ? (
                 <button className="secondary" onClick={() => { closeMobileNav(); setToken(''); localStorage.removeItem('adminToken'); navigate('/'); }}>Logout</button>
@@ -1099,8 +1163,8 @@ const App = () => {
                 <Link to="/admin" className="subtext">Admin actions</Link>
               </div>
 
-              <div className="card" style={{ background: '#fff8e6', border: '1px solid #fcd34d', color: '#92400e' }}>
-                <div className="stat-label" style={{ color: '#92400e', fontSize: 13 }}>Disclaimer</div>
+              <div className="card disclaimer-card">
+                <div className="stat-label disclaimer-label">Disclaimer</div>
                 <p style={{ margin: '6px 0 0', fontSize: 14, lineHeight: 1.4 }}>
                   This is an unofficial side project; data is not verified by the Placement Office. If you notice any genuine discrepancy, please email yash25091@iiitd.ac.in. The author is not responsible for incorrect data.
                 </p>
@@ -1127,7 +1191,7 @@ const App = () => {
                     { key: 'internship_percentage', label: 'Internship %', value: formatPct(data.internship_percentage) },
                   ];
                   return (
-                    <div key={section.key} className="card dashboard-overview-card" style={{ background: 'linear-gradient(135deg, rgba(63, 173, 168, 0.12), rgba(255, 255, 255, 0.95))' }}>
+                    <div key={section.key} className="card dashboard-overview-card">
                       <div className="section-header dashboard-overview-header" style={{ marginTop: 0, marginBottom: 12 }}>
                         <div>
                           <h3 style={{ margin: 0 }}>
@@ -1237,16 +1301,45 @@ const App = () => {
         <Route
           path="/companies"
           element={(
-            <div className="container">
-              <div className="section-header">
-                <h3>Companies · {activeBatch.label}</h3>
+            <div className="container section-page companies-page">
+              <div className="section-hero companies-hero">
+                <div className="section-hero-copy">
+                  <div className="badge section-badge">Companies</div>
+                  <h1>Company opportunities for {activeBatch.label}</h1>
+                  <p className="subtext section-hero-subtext">
+                    Explore the hiring landscape with tracked branch hires, cleaner recruiter rows, and a more polished view of this batch.
+                  </p>
+                </div>
+                <div className="section-summary-grid">
+                  <div className="section-summary-card">
+                    <div className="section-summary-label">Visible Companies</div>
+                    <div className="section-summary-value">{companyOverview.total}</div>
+                    <div className="section-summary-footnote">{companyOverview.activeTypes}</div>
+                  </div>
+                  <div className="section-summary-card">
+                    <div className="section-summary-label">Tracked Hires</div>
+                    <div className="section-summary-value">{companyOverview.trackedHires}</div>
+                    <div className="section-summary-footnote">Across the visible recruiters</div>
+                  </div>
+                  <div className="section-summary-card">
+                    <div className="section-summary-label">A+ Recruiters</div>
+                    <div className="section-summary-value">{companyOverview.spotlight}</div>
+                    <div className="section-summary-footnote">Premium category companies in this view</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="section-header section-page-header">
+                <div>
+                  <h3>Companies · {activeBatch.label}</h3>
+                  <span className="subtext">Refined table styling with recruiter tiers, branch-hiring context, and better scanability.</span>
+                </div>
                 {isAdmin && (
                   <button onClick={() => { setEditCompany(null); setShowCompanyModal(true); }}>Add Company</button>
                 )}
               </div>
 
-              {/* Toolbar: Search, Sort, Filters */}
-              <div className="toolbar">
+              <div className="toolbar section-toolbar">
                 <input
                   type="text"
                   className="search-input"
@@ -1283,7 +1376,7 @@ const App = () => {
                 </div>
               </div>
 
-              <div className="card" style={{ overflowX: 'auto' }}>
+              <div className="card table-shell table-shell-companies" style={{ overflowX: 'auto' }}>
                 <table className="table">
                   <thead>
                     <tr>
@@ -1320,32 +1413,31 @@ const App = () => {
                   <tbody>
                     {filteredCompanies.map((c) => {
                       const cat = (c.category || '').toUpperCase();
-                      const rowStyle = cat === 'A+'
-                        ? { backgroundColor: '#ecfeff' }
-                        : cat === 'A'
-                          ? { backgroundColor: '#fefce8' }
-                          : cat === 'B'
-                            ? { backgroundColor: '#fef2f2' }
-                            : {};
                       const stats = companyHiringStats[c.id] || { total: 0, CSE: 0, 'CSE-R': 0, ECE: 0, CB: 0 };
+                      const companyRowClass = cat === 'A+'
+                        ? 'company-row company-row-aplus'
+                        : cat === 'A'
+                          ? 'company-row company-row-a'
+                          : cat === 'B'
+                            ? 'company-row company-row-b'
+                            : 'company-row';
                       return (
-                        <tr key={c.id} style={rowStyle}>
+                        <tr key={c.id} className={companyRowClass}>
                           <td>
                             <button
-                              className="secondary"
-                              style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 500 }}
+                              className="secondary company-name-button"
                               onClick={() => setSelectedCompany(c)}
                             >
                               {c.name}
                             </button>
                           </td>
                           <td>{c.role}</td>
-                          <td><span className="chip">{c.type || '—'}</span></td>
-                          <td>{c.category || '—'}</td>
+                          <td><span className={`chip table-chip table-chip-type table-chip-${(c.type || 'other').toLowerCase().replace('+', '-').replace(/[^a-z-]/g, '')}`}>{c.type || '—'}</span></td>
+                          <td><span className={`chip table-chip table-chip-category table-chip-category-${cat ? cat.toLowerCase().replace('+', 'plus') : 'other'}`}>{c.category || '—'}</span></td>
                           <td>{c.ctc ?? '—'}</td>
                           <td>{c.stipend ?? '—'}</td>
                           <td>{formatDate(c.offer_date)}</td>
-                          <td style={{ fontWeight: 600 }}>{stats.total}</td>
+                          <td className="table-cell-strong">{stats.total}</td>
                           <td>{stats.CSE}</td>
                           <td>{stats.ECE}</td>
                           <td>{stats.CB}</td>
@@ -1476,16 +1568,45 @@ const App = () => {
         <Route
           path="/students"
           element={(
-            <div className="container">
-              <div className="section-header">
-                <h3>Students · {activeBatch.label}</h3>
+            <div className="container section-page students-page">
+              <div className="section-hero students-hero">
+                <div className="section-hero-copy">
+                  <div className="badge section-badge">Students</div>
+                  <h1>Student outcomes for {activeBatch.label}</h1>
+                  <p className="subtext section-hero-subtext">
+                    Filter the roster by branch, status, offer type, and program in a cleaner view designed for scanning placement progress.
+                  </p>
+                </div>
+                <div className="section-summary-grid">
+                  <div className="section-summary-card">
+                    <div className="section-summary-label">Visible Students</div>
+                    <div className="section-summary-value">{studentOverview.total}</div>
+                    <div className="section-summary-footnote">Filtered live from this cohort</div>
+                  </div>
+                  <div className="section-summary-card">
+                    <div className="section-summary-label">Placed</div>
+                    <div className="section-summary-value">{studentOverview.placed}</div>
+                    <div className="section-summary-footnote">{studentOverview.unplaced} still unplaced</div>
+                  </div>
+                  <div className="section-summary-card">
+                    <div className="section-summary-label">Programs Visible</div>
+                    <div className="section-summary-value">{studentOverview.programs}</div>
+                    <div className="section-summary-footnote">{studentOverview.internships} with internship tracks</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="section-header section-page-header">
+                <div>
+                  <h3>Students · {activeBatch.label}</h3>
+                  <span className="subtext">Sharper status cues, richer chips, and a roster table that is easier to read in both themes.</span>
+                </div>
                 {isAdmin && (
                   <button onClick={() => { setEditStudent(null); setShowStudentModal(true); }}>Add Student</button>
                 )}
               </div>
 
-              {/* Toolbar: Search, Sort, Filters */}
-              <div className="toolbar">
+              <div className="toolbar section-toolbar">
                 <input
                   type="text"
                   className="search-input"
@@ -1522,7 +1643,7 @@ const App = () => {
               </div>
 
               {availablePrograms.length > 0 && (
-                <div className="toolbar toolbar-programs">
+                <div className="toolbar toolbar-programs section-toolbar">
                   <span className="subtext">Programs</span>
                   <div className="filter-chip-row">
                     {availablePrograms.map((program) => {
@@ -1547,7 +1668,7 @@ const App = () => {
                 </div>
               )}
 
-              <div className="card" style={{ overflowX: 'auto' }}>
+              <div className="card table-shell table-shell-students" style={{ overflowX: 'auto' }}>
                 <table className="table">
                   <thead>
                     <tr>
@@ -1576,16 +1697,15 @@ const App = () => {
                   <tbody>
                     {filteredStudents.map((s) => {
                       const isPlaced = s.placement_status === 'Placed';
-                      const rowStyle = isPlaced ? { backgroundColor: '#f0fdf4' } : { backgroundColor: '#fef2f2' };
                       const offerDates = s.offers?.length
                         ? (s.offers.map((o) => formatDate(o.offer_date || o.company_offer_date)).filter((x) => x !== '—').join(', ') || '—')
                         : formatDate(s.offer_date ?? s.company_offer_date);
                       return (
-                        <tr key={s.id} style={rowStyle}>
+                        <tr key={s.id} className={isPlaced ? 'student-row student-row-placed' : 'student-row student-row-unplaced'}>
                           <td>{s.roll_number}</td>
-                          <td>{s.name}</td>
-                          <td>{s.program}</td>
-                          <td><span className="chip">{s.placement_status}</span></td>
+                          <td className="table-cell-strong">{s.name}</td>
+                          <td><span className="chip table-chip table-chip-program">{s.program}</span></td>
+                          <td><span className={`chip table-chip ${isPlaced ? 'table-chip-status-placed' : 'table-chip-status-unplaced'}`}>{s.placement_status}</span></td>
                           <td>{(s.offers?.length ? s.offers.map((o) => o.company_name).join(', ') : s.company_name) || '—'}</td>
                           <td>{(s.offers?.length ? s.offers.map((o) => o.offer_type || '—').join(', ') : s.offer_type) || '—'}</td>
                           <td>{s.offers?.length ? (s.offers.map((o) => o.ctc ?? o.company_ctc).filter(Boolean).join(', ') || '—') : (s.ctc ?? s.company_ctc ?? '—')}</td>
@@ -1627,7 +1747,7 @@ const App = () => {
                 <h3>Admin Login</h3>
                 <p className="subtext">Use institute credentials to manage the database.</p>
                 <LoginForm onLogin={handleLogin} />
-                {error && <p style={{ color: '#f87171' }}>{error}</p>}
+                {error && <p className="error-text">{error}</p>}
               </div>
             </div>
           )}
@@ -1637,7 +1757,7 @@ const App = () => {
   );
 };
 
-const LoginScreen = ({ assetBase, onSuccess, onError, error }) => (
+const LoginScreen = ({ assetBase, onSuccess, onError, error, themeMode, onToggleTheme }) => (
   <div
     className="login-screen"
     style={{
@@ -1651,12 +1771,15 @@ const LoginScreen = ({ assetBase, onSuccess, onError, error }) => (
     }}
   >
     <div className="card" style={{ maxWidth: 420, width: '100%', textAlign: 'center' }}>
+      <div className="login-theme-toggle-row">
+        <ThemeToggle themeMode={themeMode} onToggle={onToggleTheme} compact />
+      </div>
       <div style={{ marginBottom: 16 }}>
         <img src={`${assetBase}iiitd_logo.png`} alt="IIIT Delhi" style={{ maxHeight: 72, width: 'auto' }} />
       </div>
       <h2 style={{ margin: '4px 0 8px' }}>Placement Tracker</h2>
       <p className="subtext" style={{ marginBottom: 16 }}>Sign in with your iiitd.ac.in email to continue.</p>
-      {error && <div style={{ color: '#dc2626', marginBottom: 12 }}>{error}</div>}
+      {error && <div className="error-text" style={{ marginBottom: 12 }}>{error}</div>}
       <div style={{ display: 'grid', placeItems: 'center' }}>
         <GoogleLogin onSuccess={onSuccess} onError={onError} useOneTap={false} />
       </div>
