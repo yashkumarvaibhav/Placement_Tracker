@@ -1,0 +1,32 @@
+name: Keep placement API warm
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping health endpoint
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --retry 5 --retry-connrefused --retry-delay 5 \
+            "https://placement-tracker-api.onrender.com/api/health"
+
+      - name: Warm primary dashboard query
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --retry 5 --retry-connrefused --retry-delay 5 \
+            "https://placement-tracker-api.onrender.com/api/stats?batch=mtech-2027"
