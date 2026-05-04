@@ -6,6 +6,7 @@ import {
   BATCHES,
   DEFAULT_BATCH_KEY,
   METRIC_DEFINITIONS,
+  PROGRAM_OPTIONS,
   getBatchConfig,
   getBranchGroup,
 } from './batches';
@@ -333,6 +334,7 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
     offers: initialOffers,
     ...initial,
   });
+  const studentProgramOptions = [...new Set([...PROGRAM_OPTIONS, form.program].filter(Boolean))];
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -426,10 +428,9 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
         <div>
           <label>Program</label>
           <select name="program" value={form.program} onChange={handleChange}>
-            <option>CSE</option>
-            <option>CSE-R</option>
-            <option>ECE</option>
-            <option>CB</option>
+            {studentProgramOptions.map((program) => (
+              <option key={program} value={program}>{program}</option>
+            ))}
           </select>
         </div>
         <div>

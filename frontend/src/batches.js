@@ -31,6 +31,12 @@ const CSE_PROGRAMS = new Set(['CSE', 'CSE-R', 'CSAI', 'CSAM', 'CSB', 'CSD', 'CSS
 const ECE_PROGRAMS = new Set(['ECE', 'EVE']);
 const CB_PROGRAMS = new Set(['CB']);
 
+export const PROGRAM_OPTIONS = [
+  ...CSE_PROGRAMS,
+  ...ECE_PROGRAMS,
+  ...CB_PROGRAMS,
+];
+
 export const getBatchConfig = (batchKey = DEFAULT_BATCH_KEY) => (
   BATCHES.find((batch) => batch.key === batchKey) || BATCHES[0]
 );
