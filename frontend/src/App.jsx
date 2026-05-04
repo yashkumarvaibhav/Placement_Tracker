@@ -594,6 +594,7 @@ const App = () => {
   const [studentSort, setStudentSort] = useState({ field: 'roll_number', asc: true });
   const [studentFilters, setStudentFilters] = useState({ branchGroup: '', programs: [], status: '', offerType: '' });
   const [dashboardBranchFilter, setDashboardBranchFilter] = useState('ALL');
+  const [mobileHeaderHidden, setMobileHeaderHidden] = useState(false);
 
   useEffect(() => {
     localStorage.setItem('activeBatchKey', activeBatch.key);
@@ -604,6 +605,66 @@ const App = () => {
     setStudentSearch('');
     setSelectedCompany(null);
   }, [activeBatch.key]);
+
+  useEffect(() => {
+    if (!isGoogleAuthed || typeof window === 'undefined') {
+      setMobileHeaderHidden(false);
+      return undefined;
+    }
+
+    const mobileMedia = window.matchMedia('(max-width: 1180px)');
+    let lastScrollY = window.scrollY;
+    let ticking = false;
+
+    const updateHeaderVisibility = () => {
+      const currentScrollY = window.scrollY;
+      const delta = currentScrollY - lastScrollY;
+
+      if (!mobileMedia.matches || currentScrollY <= 24) {
+        setMobileHeaderHidden(false);
+      } else if (delta > 8 && currentScrollY > 120) {
+        setMobileHeaderHidden(true);
+      } else if (delta < -8) {
+        setMobileHeaderHidden(false);
+      }
+
+      lastScrollY = currentScrollY;
+      ticking = false;
+    };
+
+    const handleScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(updateHeaderVisibility);
+    };
+
+    const handleViewportChange = () => {
+      lastScrollY = window.scrollY;
+      if (!mobileMedia.matches) {
+        setMobileHeaderHidden(false);
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+
+    if (mobileMedia.addEventListener) {
+      mobileMedia.addEventListener('change', handleViewportChange);
+    } else {
+      mobileMedia.addListener(handleViewportChange);
+    }
+
+    updateHeaderVisibility();
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+
+      if (mobileMedia.removeEventListener) {
+        mobileMedia.removeEventListener('change', handleViewportChange);
+      } else {
+        mobileMedia.removeListener(handleViewportChange);
+      }
+    };
+  }, [isGoogleAuthed]);
 
   const availablePrograms = useMemo(
     () => sortPrograms([...new Set((stats.available_programs || students.map((student) => student.program)).filter(Boolean))]),
@@ -899,7 +960,7 @@ const App = () => {
 
   return (
     <>
-      <header>
+      <header className={mobileHeaderHidden ? 'header-hidden' : ''}>
         <div className="navbar">
           <div className="nav-brand-row">
             <div className="flex-row nav-logo" style={{ alignItems: 'center' }}>
