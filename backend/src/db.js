@@ -1,28 +1,45 @@
 
 import { createClient } from '@supabase/supabase-js';
+import {
+    DEFAULT_BATCH_KEY,
+    getBatchConfig,
+    getBranchGroup,
+    normalizeBatchPayload,
+} from './batches.js';
 
 // --- CONFIGURATION ---
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://bqldotdtsodmfmnxwavl.supabase.co';
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+let pgImplPromise = null;
 
 if (!SUPABASE_KEY) {
     console.error('[DB] CRITICAL: SUPABASE_SERVICE_ROLE_KEY is missing!');
-    console.error('[DB] Please add it to your Environment Variables.');
-    // We don't throw immediately to allow the server to start and log the error, 
-    // but DB ops will fail.
+    console.error('[DB] Falling back to direct Postgres mode for local development.');
 }
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
+const supabase = SUPABASE_KEY ? createClient(SUPABASE_URL, SUPABASE_KEY, {
     auth: {
         persistSession: false,
         autoRefreshToken: false,
         detectSessionInUrl: false
     }
-});
+}) : null;
 
 const ADMIN_TOKEN = 'admin-static-token';
 
-console.log(`[DB] Using Supabase HTTP API at ${SUPABASE_URL}`);
+if (supabase) {
+    console.log(`[DB] Using Supabase HTTP API at ${SUPABASE_URL}`);
+}
+
+const getPgImpl = async () => {
+    if (!pgImplPromise) pgImplPromise = import('./db.pg.js');
+    return pgImplPromise;
+};
+
+const applyBatchFilter = (query, batchKey = DEFAULT_BATCH_KEY) => {
+    const resolvedBatch = getBatchConfig(batchKey);
+    return query.eq('batch_key', resolvedBatch.key);
+};
 
 // --- HELPER: ERROR CHECK ---
 const checkError = (error, context) => {
@@ -68,22 +85,26 @@ const transformStudent = (student) => {
     } else {
         s.offers = [];
     }
+    s.branch_group = getBranchGroup(s.program);
     return s;
 };
 
 // --- API IMPLEMENTATION ---
 
 export const initDb = async () => {
+    if (!supabase) return (await getPgImpl()).initDb();
     // We cannot run CREATE TABLE via the JS Client easily.
     // We assume the schema exists (since we just migrated from PG).
     console.log('[DB] HTTP Mode: Skipping Schema Init (Tables should already exist).');
 };
 
 export const closeDb = async () => {
+    if (!supabase) return (await getPgImpl()).closeDb();
     // No persistent connection to close in HTTP mode.
 };
 
 export const ensureOfferBackfill = async () => {
+    if (!supabase) return (await getPgImpl()).ensureOfferBackfill();
     // Logic: Find students with company_id but no offers, insert offer.
     // This is complex to do efficiently in JS without a custom RPC.
     // For now, we will SKIP this auto-backfill to save bandwidth, 
@@ -94,17 +115,23 @@ export const ensureOfferBackfill = async () => {
 
 // --- COMPANIES ---
 
-export const listCompanies = async () => {
-    const { data, error } = await supabase
+export const listCompanies = async (batchKey = DEFAULT_BATCH_KEY) => {
+    if (!supabase) return (await getPgImpl()).listCompanies(batchKey);
+    let query = supabase
         .from('companies')
-        .select('*')
-        .order('name', { ascending: true });
+        .select('*');
+
+    query = applyBatchFilter(query, batchKey);
+    query = query.order('name', { ascending: true });
+
+    const { data, error } = await query;
 
     checkError(error, 'listCompanies');
-    return data;
+    return data || [];
 };
 
 export const getCompany = async (id) => {
+    if (!supabase) return (await getPgImpl()).getCompany(id);
     const { data, error } = await supabase
         .from('companies')
         .select('*')
@@ -116,6 +143,9 @@ export const getCompany = async (id) => {
 };
 
 export const createCompany = async (payload) => {
+    if (!supabase) return (await getPgImpl()).createCompany(payload);
+    const batchData = normalizeBatchPayload(payload);
+
     // Ensure strict mapping
     const row = {
         name: payload.name,
@@ -127,7 +157,8 @@ export const createCompany = async (payload) => {
         eligible_cgpa: payload.eligible_cgpa ?? null,
         backlog_allowed: payload.backlog_allowed ? true : false,
         registration_deadline: payload.registration_deadline || null,
-        offer_date: payload.offer_date || null
+        offer_date: payload.offer_date || null,
+        ...batchData,
     };
 
     const { data, error } = await supabase
@@ -141,6 +172,9 @@ export const createCompany = async (payload) => {
 };
 
 export const updateCompany = async (id, payload) => {
+    if (!supabase) return (await getPgImpl()).updateCompany(id, payload);
+    const batchData = normalizeBatchPayload(payload);
+
     const row = {
         name: payload.name,
         role: payload.role || '',
@@ -151,7 +185,8 @@ export const updateCompany = async (id, payload) => {
         eligible_cgpa: payload.eligible_cgpa ?? null,
         backlog_allowed: payload.backlog_allowed ? true : false,
         registration_deadline: payload.registration_deadline || null,
-        offer_date: payload.offer_date || null
+        offer_date: payload.offer_date || null,
+        ...batchData,
     };
 
     const { data, error } = await supabase
@@ -166,6 +201,7 @@ export const updateCompany = async (id, payload) => {
 };
 
 export const deleteCompany = async (id) => {
+    if (!supabase) return (await getPgImpl()).deleteCompany(id);
     const { error } = await supabase
         .from('companies')
         .delete()
@@ -185,7 +221,8 @@ const normalizeProgram = (programRaw = '') => {
     return programRaw || 'CSE';
 };
 
-export const listStudents = async () => {
+export const listStudents = async (batchKey = DEFAULT_BATCH_KEY) => {
+    if (!supabase) return (await getPgImpl()).listStudents(batchKey);
     // Fetch students + joined company info
     // Also fetch offers + joined company info for offers
 
@@ -193,7 +230,7 @@ export const listStudents = async () => {
     // companies (*)  -> gets the linked company for the student
     // offers ( *, companies (*) ) -> gets offers, and the company for each offer
 
-    const { data, error } = await supabase
+    let query = supabase
         .from('students')
         .select(`
             *,
@@ -202,16 +239,21 @@ export const listStudents = async () => {
                 *,
                 companies:company_id (*)
             )
-        `)
-        .order('roll_number', { ascending: true });
+        `);
+
+    query = applyBatchFilter(query, batchKey);
+    query = query.order('roll_number', { ascending: true });
+
+    const { data, error } = await query;
 
     checkError(error, 'listStudents');
 
     // Transform formatting
-    return data.map(transformStudent);
+    return (data || []).map(transformStudent);
 };
 
 export const getStudent = async (id) => {
+    if (!supabase) return (await getPgImpl()).getStudent(id);
     const { data, error } = await supabase
         .from('students')
         .select(`
@@ -260,9 +302,11 @@ const replaceOffers = async (studentId, offers = []) => {
 };
 
 export const createStudent = async (payload) => {
+    if (!supabase) return (await getPgImpl()).createStudent(payload);
     const isPlaced = payload.placement_status === 'Placed';
     const primaryCompany = isPlaced ? (payload.offers?.[0]?.company_id || payload.company_id || null) : null;
     const primaryOfferType = isPlaced ? (payload.offers?.[0]?.offer_type || payload.offer_type || null) : null;
+    const batchData = normalizeBatchPayload(payload);
 
     const row = {
         roll_number: payload.roll_number,
@@ -275,6 +319,7 @@ export const createStudent = async (payload) => {
         stipend: isPlaced ? payload.stipend ?? null : null,
         registration_deadline: isPlaced ? payload.registration_deadline || null : null,
         offer_date: isPlaced ? payload.offer_date || null : null,
+        ...batchData,
     };
 
     const { data, error } = await supabase
@@ -294,9 +339,11 @@ export const createStudent = async (payload) => {
 };
 
 export const updateStudent = async (id, payload) => {
+    if (!supabase) return (await getPgImpl()).updateStudent(id, payload);
     const isPlaced = payload.placement_status === 'Placed';
     const primaryCompany = isPlaced ? (payload.offers?.[0]?.company_id || payload.company_id || null) : null;
     const primaryOfferType = isPlaced ? (payload.offers?.[0]?.offer_type || payload.offer_type || null) : null;
+    const batchData = normalizeBatchPayload(payload);
 
     const row = {
         roll_number: payload.roll_number,
@@ -309,6 +356,7 @@ export const updateStudent = async (id, payload) => {
         stipend: isPlaced ? payload.stipend ?? null : null,
         registration_deadline: isPlaced ? payload.registration_deadline || null : null,
         offer_date: isPlaced ? payload.offer_date || null : null,
+        ...batchData,
     };
 
     const { error } = await supabase
@@ -323,16 +371,19 @@ export const updateStudent = async (id, payload) => {
 };
 
 export const deleteStudent = async (id) => {
+    if (!supabase) return (await getPgImpl()).deleteStudent(id);
     const { error } = await supabase.from('students').delete().eq('id', id);
     checkError(error, 'deleteStudent');
 };
 
 // --- STATS ---
 
-export const buildStats = async () => {
+export const buildStats = async (batchKey = DEFAULT_BATCH_KEY) => {
+    if (!supabase) return (await getPgImpl()).buildStats(batchKey);
     // We already have listing functions, just reuse them!
-    const students = await listStudents(); // This gets students + flattened offers
-    const companies = await listCompanies();
+    const batch = getBatchConfig(batchKey);
+    const students = await listStudents(batch.key);
+    const companies = await listCompanies(batch.key);
 
     // We also need all offers disjointly for some counts? 
     // Actually the logic in the old buildStats iterated over students and offers.
@@ -342,19 +393,20 @@ export const buildStats = async () => {
     // we can derive everything from `students` array, OR just fetch offers separately.
 
     // Let's fetch offers separately to match the exact logic of "Total Offers" nicely
-    const { data: offersData, error } = await supabase
-        .from('offers')
-        .select('*, companies:company_id (*)');
-    checkError(error, 'buildStats:offers');
+    const studentIds = students.map((student) => student.id);
+    let offers = [];
 
-    const offers = offersData.map(transformOffer);
+    if (studentIds.length) {
+        const { data: offersData, error } = await supabase
+            .from('offers')
+            .select('*, companies:company_id (*)')
+            .in('student_id', studentIds);
+        checkError(error, 'buildStats:offers');
+        offers = (offersData || []).map(transformOffer);
+    }
 
     // --- COPY PASTE LOGIC FROM OLD DB.JS ---
     // The logic below is pure JS processing of the arrays.
-
-    const internOffers = offers.filter((o) => (o.offer_type || '').includes('Intern') && o.offer_type !== 'Intern+FTE');
-    const fteOffers = offers.filter((o) => o.offer_type === 'FTE');
-    const comboOffers = offers.filter((o) => o.offer_type === 'Intern+FTE');
 
     // Create a map to attach program to standalone offers
     const studentProgramMap = students.reduce((acc, s) => {
@@ -374,12 +426,11 @@ export const buildStats = async () => {
     const average = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
     const toPct = (num, den) => (den ? Number(((num / den) * 100).toFixed(2)) : 0);
 
-    const summarize = (subset, programs = null) => {
+    const summarize = (subset, offerProgramFilter = null) => {
         const total = subset.length;
         const placed = subset.filter((s) => s.placement_status === 'Placed').length;
-        const programSet = programs ? new Set(programs) : null;
-        const offersSubset = programSet
-            ? offersWithProgram.filter((o) => programSet.has(o.program))
+        const offersSubset = offerProgramFilter
+            ? offersWithProgram.filter((o) => offerProgramFilter(o.program))
             : offersWithProgram;
 
         const internSub = offersSubset.filter((o) => (o.offer_type || '').includes('Intern') && o.offer_type !== 'Intern+FTE');
@@ -428,11 +479,12 @@ export const buildStats = async () => {
     };
 
     const totalStudents = students.length;
+    const inBranch = (branchGroup) => (program) => getBranchGroup(program) === branchGroup;
     const branchSummary = {
         overall: summarize(students),
-        cse: summarize(students.filter((s) => s.program === 'CSE' || s.program === 'CSE-R'), ['CSE', 'CSE-R']),
-        ece: summarize(students.filter((s) => s.program === 'ECE'), ['ECE']),
-        cb: summarize(students.filter((s) => s.program === 'CB'), ['CB']),
+        cse: summarize(students.filter((s) => getBranchGroup(s.program) === 'CSE'), inBranch('CSE')),
+        ece: summarize(students.filter((s) => getBranchGroup(s.program) === 'ECE'), inBranch('ECE')),
+        cb: summarize(students.filter((s) => getBranchGroup(s.program) === 'CB'), inBranch('CB')),
     };
 
     const overall = branchSummary.overall;
@@ -441,6 +493,7 @@ export const buildStats = async () => {
     const internCount = overall.total_intern_offers;
 
     return {
+        batch,
         number_of_companies: companies.length,
         total_offers: overall.total_offers,
         total_intern_offers: overall.total_intern_offers,
@@ -462,6 +515,7 @@ export const buildStats = async () => {
         overall_placement_percentage: toPct(placedCount, totalStudents),
         total_students: totalStudents,
         total_placed_students: placedCount,
+        available_programs: [...new Set(students.map((student) => student.program).filter(Boolean))].sort(),
         branch_summary: branchSummary,
     };
 };
@@ -469,6 +523,7 @@ export const buildStats = async () => {
 export const adminToken = ADMIN_TOKEN;
 
 export const getTableCounts = async () => {
+    if (!supabase) return (await getPgImpl()).getTableCounts();
     const { count: cCount } = await supabase.from('companies').select('*', { count: 'exact', head: true });
     const { count: sCount } = await supabase.from('students').select('*', { count: 'exact', head: true });
     const { count: oCount } = await supabase.from('offers').select('*', { count: 'exact', head: true });

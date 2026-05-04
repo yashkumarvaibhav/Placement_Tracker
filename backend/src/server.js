@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import { BATCHES, getBatchConfig } from './batches.js';
 import {
   adminToken,
   buildStats,
@@ -32,6 +33,12 @@ app.use(cors({
 }));
 app.use(express.json());
 
+const resolveBatchKey = (batchKey) => getBatchConfig(batchKey).key;
+const withResolvedBatch = (req) => ({
+  ...req.body,
+  batch_key: req.body?.batch_key || resolveBatchKey(req.query.batch),
+});
+
 const authMiddleware = (req, res, next) => {
   const auth = req.headers.authorization || '';
   if (!auth.startsWith('Bearer ')) return res.status(401).json({ message: 'Unauthorized' });
@@ -48,10 +55,14 @@ app.post('/api/login', (req, res) => {
   return res.status(401).json({ message: 'Invalid credentials' });
 });
 
+app.get('/api/batches', (_req, res) => {
+  res.json(BATCHES);
+});
+
 // Company routes
-app.get('/api/companies', async (_req, res) => {
+app.get('/api/companies', async (req, res) => {
   try {
-    const data = await listCompanies();
+    const data = await listCompanies(resolveBatchKey(req.query.batch));
     res.json(data);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -70,7 +81,7 @@ app.get('/api/companies/:id', async (req, res) => {
 
 app.post('/api/companies', authMiddleware, async (req, res) => {
   try {
-    const created = await createCompany(req.body);
+    const created = await createCompany(withResolvedBatch(req));
     res.status(201).json(created);
   } catch (err) {
     res.status(400).json({ message: err.message });
@@ -81,7 +92,7 @@ app.put('/api/companies/:id', authMiddleware, async (req, res) => {
   try {
     const exists = await getCompany(req.params.id);
     if (!exists) return res.status(404).json({ message: 'Company not found' });
-    const updated = await updateCompany(req.params.id, req.body);
+    const updated = await updateCompany(req.params.id, withResolvedBatch(req));
     res.json(updated);
   } catch (err) {
     res.status(400).json({ message: err.message });
@@ -94,9 +105,9 @@ app.delete('/api/companies/:id', authMiddleware, async (req, res) => {
 });
 
 // Student routes
-app.get('/api/students', async (_req, res) => {
+app.get('/api/students', async (req, res) => {
   try {
-    const data = await listStudents();
+    const data = await listStudents(resolveBatchKey(req.query.batch));
     res.json(data);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -115,15 +126,19 @@ app.get('/api/students/:id', async (req, res) => {
 
 app.post('/api/students', authMiddleware, async (req, res) => {
   try {
-    if (req.body.placement_status === 'Placed') {
-      const offers = req.body.offers || (req.body.company_id ? [{ company_id: req.body.company_id }] : []);
+    const payload = withResolvedBatch(req);
+    if (payload.placement_status === 'Placed') {
+      const offers = payload.offers || (payload.company_id ? [{ company_id: payload.company_id }] : []);
       if (!offers.length) return res.status(400).json({ message: 'At least one company offer is required for placed students' });
       for (const offer of offers) {
         const existsCompany = await getCompany(offer.company_id);
         if (!existsCompany) return res.status(400).json({ message: `Company does not exist (id: ${offer.company_id})` });
+        if (existsCompany.batch_key && existsCompany.batch_key !== payload.batch_key) {
+          return res.status(400).json({ message: `Company ${offer.company_id} belongs to a different batch` });
+        }
       }
     }
-    const created = await createStudent(req.body);
+    const created = await createStudent(payload);
     res.status(201).json(created);
   } catch (err) {
     res.status(400).json({ message: err.message });
@@ -134,15 +149,19 @@ app.put('/api/students/:id', authMiddleware, async (req, res) => {
   try {
     const exists = await getStudent(req.params.id);
     if (!exists) return res.status(404).json({ message: 'Student not found' });
-    if (req.body.placement_status === 'Placed') {
-      const offers = req.body.offers || (req.body.company_id ? [{ company_id: req.body.company_id }] : []);
+    const payload = withResolvedBatch(req);
+    if (payload.placement_status === 'Placed') {
+      const offers = payload.offers || (payload.company_id ? [{ company_id: payload.company_id }] : []);
       if (!offers.length) return res.status(400).json({ message: 'At least one company offer is required for placed students' });
       for (const offer of offers) {
         const existsCompany = await getCompany(offer.company_id);
         if (!existsCompany) return res.status(400).json({ message: `Company does not exist (id: ${offer.company_id})` });
+        if (existsCompany.batch_key && existsCompany.batch_key !== payload.batch_key) {
+          return res.status(400).json({ message: `Company ${offer.company_id} belongs to a different batch` });
+        }
       }
     }
-    const updated = await updateStudent(req.params.id, req.body);
+    const updated = await updateStudent(req.params.id, payload);
     res.json(updated);
   } catch (err) {
     res.status(400).json({ message: err.message });
@@ -154,9 +173,9 @@ app.delete('/api/students/:id', authMiddleware, async (req, res) => {
   res.status(204).end();
 });
 
-app.get('/api/stats', async (_req, res) => {
+app.get('/api/stats', async (req, res) => {
   try {
-    const stats = await buildStats();
+    const stats = await buildStats(resolveBatchKey(req.query.batch));
     res.json(stats);
   } catch (err) {
     console.error('Error fetching stats:', err.message);

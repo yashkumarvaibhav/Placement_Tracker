@@ -2,6 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { Link, Route, Routes, useNavigate } from 'react-router-dom';
 import { GoogleLogin } from '@react-oauth/google';
+import {
+  BATCHES,
+  DEFAULT_BATCH_KEY,
+  METRIC_DEFINITIONS,
+  getBatchConfig,
+  getBranchGroup,
+} from './batches';
 
 const api = axios.create({ baseURL: import.meta.env.VITE_API_BASE || '/api' });
 const assetBase = import.meta.env.BASE_URL || '/';
@@ -23,6 +30,168 @@ const StatCard = ({ label, value }) => (
     <div className="stat-label">{label}</div>
   </div>
 );
+
+const InfoTip = ({ text }) => {
+  if (!text) return null;
+
+  return (
+    <span className="info-tip" tabIndex={0} aria-label={text}>
+      i
+      <span className="info-tooltip">{text}</span>
+    </span>
+  );
+};
+
+const MetricLabel = ({ metricKey, children }) => (
+  <span className="metric-label-inline">
+    <span>{children}</span>
+    <InfoTip text={METRIC_DEFINITIONS[metricKey]} />
+  </span>
+);
+
+const BRANCH_GROUP_ORDER = { CSE: 0, ECE: 1, CB: 2, OTHER: 3 };
+
+const DASHBOARD_BRANCH_LABELS = {
+  ALL: 'All programs',
+  CSE: 'CSE group',
+  ECE: 'ECE group',
+  CB: 'CB group',
+  OTHER: 'Other programs',
+};
+
+const EMPTY_SLICE_SUMMARY = {
+  total_students: 0,
+  placed_students: 0,
+  total_offers: 0,
+  total_intern_offers: 0,
+  total_fte_offers: 0,
+  total_combo_offers: 0,
+  total_Aplus_offers: 0,
+  total_A_offers: 0,
+  total_B_offers: 0,
+  highest_ctc: null,
+  average_ctc: null,
+  median_ctc: null,
+  highest_stipend: null,
+  average_stipend: null,
+  median_stipend: null,
+  placement_percentage: 0,
+  internship_percentage: 0,
+  fte_percentage: 0,
+};
+
+const sortPrograms = (programs) => [...programs].sort((left, right) => {
+  const leftGroup = BRANCH_GROUP_ORDER[getBranchGroup(left)] ?? 99;
+  const rightGroup = BRANCH_GROUP_ORDER[getBranchGroup(right)] ?? 99;
+  if (leftGroup !== rightGroup) return leftGroup - rightGroup;
+  return left.localeCompare(right);
+});
+
+const getStudentOffers = (student) => {
+  if (student.offers?.length) return student.offers;
+  if (!student.company_id) return [];
+
+  return [{
+    offer_type: student.offer_type,
+    ctc: student.ctc,
+    stipend: student.stipend,
+    company_category: student.company_category,
+    company_ctc: student.company_ctc,
+    company_stipend: student.company_stipend,
+  }];
+};
+
+const buildProgramSummaries = (students) => {
+  if (!students.length) {
+    return { branchGroups: [], branchSummaries: { ALL: EMPTY_SLICE_SUMMARY }, programSummaries: [] };
+  }
+
+  const offersWithProgram = students.flatMap((student) => (
+    getStudentOffers(student).map((offer) => ({ ...offer, program: student.program }))
+  ));
+
+  const median = (values) => {
+    if (!values.length) return null;
+    const sorted = [...values].sort((left, right) => left - right);
+    const middle = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+  };
+
+  const average = (values) => (values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null);
+  const toPct = (value, total) => (total ? Number(((value / total) * 100).toFixed(2)) : 0);
+
+  const summarize = (subset, offerProgramFilter) => {
+    const total = subset.length;
+    const placed = subset.filter((student) => student.placement_status === 'Placed').length;
+    const offersSubset = offersWithProgram.filter((offer) => offerProgramFilter(offer.program));
+    const internOffers = offersSubset.filter((offer) => (offer.offer_type || '').includes('Intern') && offer.offer_type !== 'Intern+FTE');
+    const fteOffers = offersSubset.filter((offer) => offer.offer_type === 'FTE');
+    const comboOffers = offersSubset.filter((offer) => offer.offer_type === 'Intern+FTE');
+
+    const categories = { Aplus: 0, A: 0, B: 0 };
+    offersSubset.forEach((offer) => {
+      const category = offer.company_category?.toUpperCase();
+      if (category === 'A+') categories.Aplus += 1;
+      else if (category === 'A') categories.A += 1;
+      else if (category === 'B') categories.B += 1;
+    });
+
+    const ctcValues = offersSubset
+      .map((offer) => offer.ctc ?? offer.company_ctc)
+      .filter((value) => typeof value === 'number');
+    const stipendValues = offersSubset
+      .map((offer) => offer.stipend ?? offer.company_stipend)
+      .filter((value) => typeof value === 'number');
+
+    const internshipCount = internOffers.length + comboOffers.length;
+    const fteCount = fteOffers.length + comboOffers.length;
+
+    return {
+      total_students: total,
+      placed_students: placed,
+      total_offers: offersSubset.length,
+      total_intern_offers: internOffers.length,
+      total_fte_offers: fteCount,
+      total_combo_offers: comboOffers.length,
+      total_Aplus_offers: categories.Aplus,
+      total_A_offers: categories.A,
+      total_B_offers: categories.B,
+      highest_ctc: ctcValues.length ? Math.max(...ctcValues) : null,
+      average_ctc: average(ctcValues),
+      median_ctc: median(ctcValues),
+      highest_stipend: stipendValues.length ? Math.max(...stipendValues) : null,
+      average_stipend: average(stipendValues),
+      median_stipend: median(stipendValues),
+      placement_percentage: toPct(placed, total),
+      internship_percentage: toPct(internshipCount, total),
+      fte_percentage: toPct(fteCount, total),
+    };
+  };
+
+  const programs = sortPrograms([...new Set(students.map((student) => student.program).filter(Boolean))]);
+  const branchGroups = [...new Set(programs.map((program) => getBranchGroup(program)))].sort(
+    (left, right) => (BRANCH_GROUP_ORDER[left] ?? 99) - (BRANCH_GROUP_ORDER[right] ?? 99)
+  );
+  const branchSummaries = branchGroups.reduce((accumulator, branchGroup) => ({
+    ...accumulator,
+    [branchGroup]: summarize(
+      students.filter((student) => getBranchGroup(student.program) === branchGroup),
+      (offerProgram) => getBranchGroup(offerProgram) === branchGroup
+    ),
+  }), {
+    ALL: summarize(students, () => true),
+  });
+
+  return {
+    branchGroups,
+    branchSummaries,
+    programSummaries: programs.map((program) => ({
+      program,
+      branchGroup: getBranchGroup(program),
+      summary: summarize(students.filter((student) => student.program === program), (offerProgram) => offerProgram === program),
+    })),
+  };
+};
 
 const Modal = ({ open, onClose, children }) => {
   if (!open) return null;
@@ -346,7 +515,9 @@ const App = () => {
   const navigate = useNavigate();
   const [token, setToken] = useState(localStorage.getItem('adminToken') || '');
   const [googleEmail, setGoogleEmail] = useState(localStorage.getItem('googleEmail') || '');
+  const [activeBatchKey, setActiveBatchKey] = useState(localStorage.getItem('activeBatchKey') || DEFAULT_BATCH_KEY);
   const authHeaders = useAdminHeaders(token);
+  const activeBatch = useMemo(() => getBatchConfig(activeBatchKey), [activeBatchKey]);
 
   const [stats, setStats] = useState({});
   const [companies, setCompanies] = useState([]);
@@ -415,13 +586,58 @@ const App = () => {
   // Companies page: search, sort, filter, detail
   const [companySearch, setCompanySearch] = useState('');
   const [companySort, setCompanySort] = useState({ field: 'name', asc: true });
-  const [companyFilters, setCompanyFilters] = useState({ type: '', category: '' });
+  const [companyFilters, setCompanyFilters] = useState({ type: '', category: '', branchGroup: '' });
   const [selectedCompany, setSelectedCompany] = useState(null);
 
   // Students page: search, sort, filter
   const [studentSearch, setStudentSearch] = useState('');
   const [studentSort, setStudentSort] = useState({ field: 'roll_number', asc: true });
-  const [studentFilters, setStudentFilters] = useState({ program: '', status: '', offerType: '' });
+  const [studentFilters, setStudentFilters] = useState({ branchGroup: '', programs: [], status: '', offerType: '' });
+  const [dashboardBranchFilter, setDashboardBranchFilter] = useState('ALL');
+
+  useEffect(() => {
+    localStorage.setItem('activeBatchKey', activeBatch.key);
+    setCompanyFilters({ type: '', category: '', branchGroup: '' });
+    setStudentFilters({ branchGroup: '', programs: [], status: '', offerType: '' });
+    setDashboardBranchFilter('ALL');
+    setCompanySearch('');
+    setStudentSearch('');
+    setSelectedCompany(null);
+  }, [activeBatch.key]);
+
+  const availablePrograms = useMemo(
+    () => sortPrograms([...new Set((stats.available_programs || students.map((student) => student.program)).filter(Boolean))]),
+    [stats.available_programs, students]
+  );
+
+  const { branchGroups: dashboardBranchGroups, branchSummaries: dashboardBranchSummaries, programSummaries } = useMemo(
+    () => buildProgramSummaries(students),
+    [students]
+  );
+
+  const dashboardBranchFilters = useMemo(
+    () => ['ALL', ...dashboardBranchGroups],
+    [dashboardBranchGroups]
+  );
+
+  const filteredProgramSummaries = useMemo(
+    () => programSummaries.filter(({ branchGroup }) => dashboardBranchFilter === 'ALL' || branchGroup === dashboardBranchFilter),
+    [dashboardBranchFilter, programSummaries]
+  );
+
+  const activeOverviewSummary = useMemo(
+    () => dashboardBranchSummaries[dashboardBranchFilter] || EMPTY_SLICE_SUMMARY,
+    [dashboardBranchFilter, dashboardBranchSummaries]
+  );
+
+  const toggleProgramFilter = (program) => {
+    setStudentFilters((prev) => ({
+      ...prev,
+      programs: prev.programs.includes(program)
+        ? prev.programs.filter((item) => item !== program)
+        : [...prev.programs, program],
+    }));
+  };
 
   // Compute hiring stats per company from students data
   const companyHiringStats = useMemo(() => {
@@ -430,10 +646,12 @@ const App = () => {
       (s.offers || []).forEach((o) => {
         const cid = o.company_id;
         if (!cid) return;
-        if (!stats[cid]) stats[cid] = { total: 0, CSE: 0, 'CSE-R': 0, ECE: 0, CB: 0, students: [] };
+        const branchGroup = s.branch_group || getBranchGroup(s.program);
+        if (!stats[cid]) stats[cid] = { total: 0, CSE: 0, ECE: 0, CB: 0, OTHER: 0, students: [] };
         stats[cid].total++;
-        if (stats[cid][s.program] !== undefined) stats[cid][s.program]++;
-        stats[cid].students.push({ name: s.name, roll: s.roll_number, program: s.program });
+        if (stats[cid][branchGroup] !== undefined) stats[cid][branchGroup]++;
+        else stats[cid].OTHER++;
+        stats[cid].students.push({ name: s.name, roll: s.roll_number, program: s.program, branch_group: branchGroup });
       });
     });
     return stats;
@@ -455,6 +673,9 @@ const App = () => {
     if (companyFilters.category) {
       result = result.filter((c) => (c.category || '').toUpperCase() === companyFilters.category.toUpperCase());
     }
+    if (companyFilters.branchGroup) {
+      result = result.filter((c) => (companyHiringStats[c.id]?.[companyFilters.branchGroup] || 0) > 0);
+    }
     // Sort
     const { field, asc } = companySort;
     result.sort((a, b) => {
@@ -463,8 +684,8 @@ const App = () => {
         av = companyHiringStats[a.id]?.total || 0;
         bv = companyHiringStats[b.id]?.total || 0;
       } else if (field === 'cseHired') {
-        av = (companyHiringStats[a.id]?.CSE || 0) + (companyHiringStats[a.id]?.['CSE-R'] || 0);
-        bv = (companyHiringStats[b.id]?.CSE || 0) + (companyHiringStats[b.id]?.['CSE-R'] || 0);
+        av = companyHiringStats[a.id]?.CSE || 0;
+        bv = companyHiringStats[b.id]?.CSE || 0;
       } else if (field === 'eceHired') {
         av = companyHiringStats[a.id]?.ECE || 0;
         bv = companyHiringStats[b.id]?.ECE || 0;
@@ -497,8 +718,11 @@ const App = () => {
       result = result.filter((s) => s.name?.toLowerCase().includes(q) || s.roll_number?.toLowerCase().includes(q));
     }
     // Filter by program
-    if (studentFilters.program) {
-      result = result.filter((s) => s.program === studentFilters.program);
+    if (studentFilters.branchGroup) {
+      result = result.filter((s) => (s.branch_group || getBranchGroup(s.program)) === studentFilters.branchGroup);
+    }
+    if (studentFilters.programs.length) {
+      result = result.filter((s) => studentFilters.programs.includes(s.program));
     }
     // Filter by status
     if (studentFilters.status) {
@@ -572,10 +796,11 @@ const App = () => {
 
     const fetchData = async () => {
       try {
+        const params = { params: { batch: activeBatch.key } };
         const [statsRes, companyRes, studentRes] = await Promise.all([
-          api.get('/stats'),
-          api.get('/companies'),
-          api.get('/students'),
+          api.get('/stats', params),
+          api.get('/companies', params),
+          api.get('/students', params),
         ]);
         setStats(statsRes.data);
         setCompanies(companyRes.data);
@@ -601,7 +826,7 @@ const App = () => {
   useEffect(() => {
     if (isGoogleAuthed) refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isGoogleAuthed]);
+  }, [isGoogleAuthed, activeBatch.key]);
 
   const handleLogin = async (email, password) => {
     try {
@@ -617,12 +842,18 @@ const App = () => {
 
   const isAdmin = !!token;
 
+  const batchPayload = {
+    batch_key: activeBatch.key,
+    degree: activeBatch.degree,
+    graduation_year: activeBatch.graduation_year,
+  };
+
   const saveCompany = async (payload) => {
     if (!isAdmin) return;
     if (editCompany) {
-      await api.put(`/companies/${editCompany.id}`, payload, authHeaders);
+      await api.put(`/companies/${editCompany.id}`, { ...payload, ...batchPayload }, authHeaders);
     } else {
-      await api.post('/companies', payload, authHeaders);
+      await api.post('/companies', { ...payload, ...batchPayload }, authHeaders);
     }
     setShowCompanyModal(false);
     setEditCompany(null);
@@ -638,9 +869,9 @@ const App = () => {
   const saveStudent = async (payload) => {
     if (!isAdmin) return;
     if (editStudent) {
-      await api.put(`/students/${editStudent.id}`, payload, authHeaders);
+      await api.put(`/students/${editStudent.id}`, { ...payload, ...batchPayload }, authHeaders);
     } else {
-      await api.post('/students', payload, authHeaders);
+      await api.post('/students', { ...payload, ...batchPayload }, authHeaders);
     }
     setShowStudentModal(false);
     setEditStudent(null);
@@ -677,6 +908,7 @@ const App = () => {
             <Link to="/">Dashboard</Link>
             <Link to="/companies">Companies</Link>
             <Link to="/students">Students</Link>
+            <span className="badge">{activeBatch.label}</span>
             {googleEmail && <span className="subtext">{googleEmail}</span>}
             <button className="secondary" onClick={handleGoogleLogout}>Sign out</button>
             {isAdmin ? (
@@ -693,6 +925,19 @@ const App = () => {
           path="/"
           element={(
             <div className="container">
+              <div className="batch-tabs">
+                {BATCHES.map((batch) => (
+                  <button
+                    key={batch.key}
+                    type="button"
+                    className={activeBatch.key === batch.key ? 'batch-tab active' : 'batch-tab'}
+                    onClick={() => setActiveBatchKey(batch.key)}
+                  >
+                    {batch.label}
+                  </button>
+                ))}
+              </div>
+
               <div
                 className="hero"
                 style={{
@@ -703,21 +948,24 @@ const App = () => {
                 }}
               >
                 <div>
-                  <div className="badge" style={{ display: 'inline-block', marginBottom: 10 }}>Unofficial Dashboard</div>
-                  <h1 style={{ margin: '4px 0 6px' }}>M.Tech Placement Data for Batch passing out in 2026</h1>
+                  <div className="badge" style={{ display: 'inline-block', marginBottom: 10 }}>Selected Cohort</div>
+                  <h1 style={{ margin: '4px 0 6px' }}>Placement Data for {activeBatch.label} Passout Batch</h1>
+                  <p className="subtext" style={{ marginTop: 0, maxWidth: 720 }}>
+                    Dashboard defaults to M.Tech 2027. Use the branch filter in the overall section to narrow the actual programs shown for the selected batch.
+                  </p>
                   {error && <p style={{ color: '#dc2626' }}>{error}</p>}
                 </div>
                 <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px,1fr))', alignItems: 'stretch' }}>
                   <div className="card" style={{ textAlign: 'center', background: 'rgba(255,255,255,0.9)' }}>
-                    <div className="stat-label">Total Companies</div>
+                    <div className="stat-label"><MetricLabel metricKey="number_of_companies">Total Companies</MetricLabel></div>
                     <div className="stat-value" style={{ fontSize: 30 }}>{stats.number_of_companies ?? '—'}</div>
                   </div>
                   <div className="card" style={{ textAlign: 'center', background: 'rgba(255,255,255,0.9)' }}>
-                    <div className="stat-label">Total Offers</div>
+                    <div className="stat-label"><MetricLabel metricKey="total_offers">Total Offers</MetricLabel></div>
                     <div className="stat-value" style={{ fontSize: 30 }}>{stats.total_offers ?? '—'}</div>
                   </div>
                   <div className="card" style={{ textAlign: 'center', background: 'rgba(255,255,255,0.9)' }}>
-                    <div className="stat-label">Placement %</div>
+                    <div className="stat-label"><MetricLabel metricKey="overall_placement_percentage">Placement %</MetricLabel></div>
                     <div className="stat-value" style={{ fontSize: 30 }}>{formatPct(stats.overall_placement_percentage)}</div>
                   </div>
                 </div>
@@ -737,34 +985,57 @@ const App = () => {
 
               <div className="grid" style={{ gridTemplateColumns: '1fr', gap: 16 }}>
                 {[{ key: 'overall', title: 'Overall', variant: 'large' }].map((section) => {
-                  const data = stats.branch_summary?.[section.key] || {};
+                  const data = activeOverviewSummary;
                   const metrics = [
-                    { label: 'Total Students (2026)', value: data.total_students },
-                    { label: 'Total Placed', value: data.placed_students },
-                    { label: 'Intern Offers', value: data.total_intern_offers },
-                    { label: 'FTE Offers', value: data.total_fte_offers },
-                    { label: 'Intern+FTE Offers', value: data.total_combo_offers },
-                    { label: 'A+ Offers', value: data.total_Aplus_offers },
-                    { label: 'A Offers', value: data.total_A_offers },
-                    { label: 'B Offers', value: data.total_B_offers },
-                    { label: 'Highest CTC', value: formatInr(data.highest_ctc, 'p.a.') },
-                    { label: 'Avg CTC', value: formatInr(data.average_ctc, 'p.a.') },
-                    { label: 'Median CTC', value: formatInr(data.median_ctc, 'p.a.') },
-                    { label: 'Highest Stipend', value: formatInr(data.highest_stipend, 'p.m.') },
-                    { label: 'Avg Stipend', value: formatInr(data.average_stipend, 'p.m.') },
-                    { label: 'Placement %', value: formatPct(data.placement_percentage) },
-                    { label: 'Internship %', value: formatPct(data.internship_percentage) },
+                    { key: 'total_students', label: 'Total Students', value: data.total_students },
+                    { key: 'placed_students', label: 'Total Placed', value: data.placed_students },
+                    { key: 'total_intern_offers', label: 'Intern Offers', value: data.total_intern_offers },
+                    { key: 'total_fte_offers', label: 'FTE Offers', value: data.total_fte_offers },
+                    { key: 'total_combo_offers', label: 'Intern+FTE Offers', value: data.total_combo_offers },
+                    { key: 'total_Aplus_offers', label: 'A+ Offers', value: data.total_Aplus_offers },
+                    { key: 'total_A_offers', label: 'A Offers', value: data.total_A_offers },
+                    { key: 'total_B_offers', label: 'B Offers', value: data.total_B_offers },
+                    { key: 'highest_ctc', label: 'Highest CTC', value: formatInr(data.highest_ctc, 'p.a.') },
+                    { key: 'average_ctc', label: 'Avg CTC', value: formatInr(data.average_ctc, 'p.a.') },
+                    { key: 'median_ctc', label: 'Median CTC', value: formatInr(data.median_ctc, 'p.a.') },
+                    { key: 'highest_stipend', label: 'Highest Stipend', value: formatInr(data.highest_stipend, 'p.m.') },
+                    { key: 'average_stipend', label: 'Avg Stipend', value: formatInr(data.average_stipend, 'p.m.') },
+                    { key: 'placement_percentage', label: 'Placement %', value: formatPct(data.placement_percentage) },
+                    { key: 'internship_percentage', label: 'Internship %', value: formatPct(data.internship_percentage) },
                   ];
                   return (
-                    <div key={section.key} className="card" style={{ background: 'linear-gradient(135deg, rgba(63, 173, 168, 0.12), rgba(255, 255, 255, 0.95))' }}>
-                      <div className="section-header" style={{ marginTop: 0, marginBottom: 12 }}>
-                        <h3 style={{ margin: 0 }}>{section.title}</h3>
-                        <span className="subtext">Graduating 2026</span>
+                    <div key={section.key} className="card dashboard-overview-card" style={{ background: 'linear-gradient(135deg, rgba(63, 173, 168, 0.12), rgba(255, 255, 255, 0.95))' }}>
+                      <div className="section-header dashboard-overview-header" style={{ marginTop: 0, marginBottom: 12 }}>
+                        <div>
+                          <h3 style={{ margin: 0 }}>
+                            {dashboardBranchFilter === 'ALL' ? section.title : `${DASHBOARD_BRANCH_LABELS[dashboardBranchFilter] || dashboardBranchFilter} Overview`}
+                          </h3>
+                          <span className="subtext">
+                            {dashboardBranchFilter === 'ALL'
+                              ? `Passing out in ${activeBatch.graduation_year}`
+                              : `Consolidated data for ${DASHBOARD_BRANCH_LABELS[dashboardBranchFilter] || dashboardBranchFilter} · Passing out in ${activeBatch.graduation_year}`}
+                          </span>
+                        </div>
+                        <div className="dashboard-filter-group">
+                          <span className="subtext">Branch filter</span>
+                          <div className="filter-chip-row">
+                            {dashboardBranchFilters.map((branchGroup) => (
+                              <button
+                                key={branchGroup}
+                                type="button"
+                                className={dashboardBranchFilter === branchGroup ? 'filter-chip active' : 'filter-chip'}
+                                onClick={() => setDashboardBranchFilter(branchGroup)}
+                              >
+                                {DASHBOARD_BRANCH_LABELS[branchGroup] || branchGroup}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                       </div>
-                      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+                      <div className="grid dashboard-overview-metrics" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
                         {metrics.map((m) => (
                           <div key={m.label}>
-                            <div className="stat-label" style={{ fontSize: 12 }}>{m.label}</div>
+                            <div className="stat-label" style={{ fontSize: 12 }}><MetricLabel metricKey={m.key}>{m.label}</MetricLabel></div>
                             <div className="stat-value" style={{ fontSize: 16 }}>{m.value ?? '—'}</div>
                           </div>
                         ))}
@@ -773,43 +1044,67 @@ const App = () => {
                   );
                 })}
 
-                <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
-                  {[{ key: 'cse', title: 'CSE & CSE Research' }, { key: 'ece', title: 'ECE' }, { key: 'cb', title: 'CB' }].map((section) => {
-                    const data = stats.branch_summary?.[section.key] || {};
-                    const metrics = [
-                      { label: 'Total Students (2026)', value: data.total_students },
-                      { label: 'Total Placed', value: data.placed_students },
-                      { label: 'Intern Offers', value: data.total_intern_offers },
-                      { label: 'FTE Offers', value: data.total_fte_offers },
-                      { label: 'Intern+FTE Offers', value: data.total_combo_offers },
-                      { label: 'A+ Offers', value: data.total_Aplus_offers },
-                      { label: 'A Offers', value: data.total_A_offers },
-                      { label: 'B Offers', value: data.total_B_offers },
-                      { label: 'Highest CTC', value: formatInr(data.highest_ctc, 'p.a.') },
-                      { label: 'Avg CTC', value: formatInr(data.average_ctc, 'p.a.') },
-                      { label: 'Median CTC', value: formatInr(data.median_ctc, 'p.a.') },
-                      { label: 'Highest Stipend', value: formatInr(data.highest_stipend, 'p.m.') },
-                      { label: 'Avg Stipend', value: formatInr(data.average_stipend, 'p.m.') },
-                      { label: 'Placement %', value: formatPct(data.placement_percentage) },
-                      { label: 'Internship %', value: formatPct(data.internship_percentage) },
-                    ];
-                    return (
-                      <div key={section.key} className="card" style={{ background: '#ffffff' }}>
-                        <div className="section-header" style={{ marginTop: 0, marginBottom: 12 }}>
-                          <h3 style={{ margin: 0 }}>{section.title}</h3>
-                          <span className="subtext">Graduating 2026</span>
-                        </div>
-                        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
-                          {metrics.map((m) => (
-                            <div key={m.label}>
-                              <div className="stat-label" style={{ fontSize: 12 }}>{m.label}</div>
-                              <div className="stat-value" style={{ fontSize: 15 }}>{m.value ?? '—'}</div>
+                <div className="card dashboard-programs-panel">
+                  <div className="section-header" style={{ marginTop: 0, marginBottom: 16 }}>
+                    <div>
+                      <h3 style={{ margin: 0 }}>Programs In {activeBatch.label}</h3>
+                      <span className="subtext">
+                        {dashboardBranchFilter === 'ALL'
+                          ? 'Showing every program in this cohort.'
+                          : `Showing programs in the ${DASHBOARD_BRANCH_LABELS[dashboardBranchFilter] || dashboardBranchFilter.toLowerCase()}.`}
+                      </span>
+                    </div>
+                    <span className="badge">{filteredProgramSummaries.length} programs</span>
+                  </div>
+
+                  {filteredProgramSummaries.length ? (
+                    <div className="program-summary-grid">
+                      {filteredProgramSummaries.map(({ program, branchGroup, summary }) => {
+                        const metrics = [
+                          { key: 'total_students', label: 'Total Students', value: summary.total_students },
+                          { key: 'placed_students', label: 'Total Placed', value: summary.placed_students },
+                          { key: 'total_intern_offers', label: 'Intern Offers', value: summary.total_intern_offers },
+                          { key: 'total_fte_offers', label: 'FTE Offers', value: summary.total_fte_offers },
+                          { key: 'total_combo_offers', label: 'Intern+FTE Offers', value: summary.total_combo_offers },
+                          { key: 'total_Aplus_offers', label: 'A+ Offers', value: summary.total_Aplus_offers },
+                          { key: 'total_A_offers', label: 'A Offers', value: summary.total_A_offers },
+                          { key: 'total_B_offers', label: 'B Offers', value: summary.total_B_offers },
+                          { key: 'highest_ctc', label: 'Highest CTC', value: formatInr(summary.highest_ctc, 'p.a.') },
+                          { key: 'average_ctc', label: 'Avg CTC', value: formatInr(summary.average_ctc, 'p.a.') },
+                          { key: 'median_ctc', label: 'Median CTC', value: formatInr(summary.median_ctc, 'p.a.') },
+                          { key: 'highest_stipend', label: 'Highest Stipend', value: formatInr(summary.highest_stipend, 'p.m.') },
+                          { key: 'average_stipend', label: 'Avg Stipend', value: formatInr(summary.average_stipend, 'p.m.') },
+                          { key: 'placement_percentage', label: 'Placement %', value: formatPct(summary.placement_percentage) },
+                          { key: 'internship_percentage', label: 'Internship %', value: formatPct(summary.internship_percentage) },
+                        ];
+
+                        return (
+                          <div key={program} className="program-summary-card">
+                            <div className="program-summary-header">
+                              <div>
+                                <h3>{program}</h3>
+                                <span className="subtext">Actual program in {activeBatch.label}</span>
+                              </div>
+                              <span className="program-summary-badge">{branchGroup}</span>
                             </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
+
+                            <div className="program-summary-metrics">
+                              {metrics.map((metric) => (
+                                <div key={metric.label} className="program-summary-metric">
+                                  <div className="stat-label"><MetricLabel metricKey={metric.key}>{metric.label}</MetricLabel></div>
+                                  <div className="stat-value" style={{ fontSize: 16 }}>{metric.value ?? '—'}</div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="program-summary-empty">
+                      No programs match the selected branch filter for this batch.
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -821,7 +1116,7 @@ const App = () => {
           element={(
             <div className="container">
               <div className="section-header">
-                <h3>Companies</h3>
+                <h3>Companies · {activeBatch.label}</h3>
                 {isAdmin && (
                   <button onClick={() => { setEditCompany(null); setShowCompanyModal(true); }}>Add Company</button>
                 )}
@@ -852,6 +1147,15 @@ const App = () => {
                     <option value="A+">A+</option>
                     <option value="A">A</option>
                     <option value="B">B</option>
+                  </select>
+                </div>
+                <div className="filter-group">
+                  <label>Branch group:</label>
+                  <select value={companyFilters.branchGroup} onChange={(e) => setCompanyFilters((f) => ({ ...f, branchGroup: e.target.value }))}>
+                    <option value="">All</option>
+                    <option value="CSE">CSE</option>
+                    <option value="ECE">ECE</option>
+                    <option value="CB">CB</option>
                   </select>
                 </div>
               </div>
@@ -919,7 +1223,7 @@ const App = () => {
                           <td>{c.stipend ?? '—'}</td>
                           <td>{formatDate(c.offer_date)}</td>
                           <td style={{ fontWeight: 600 }}>{stats.total}</td>
-                          <td>{stats.CSE + (stats['CSE-R'] || 0)}</td>
+                          <td>{stats.CSE}</td>
                           <td>{stats.ECE}</td>
                           <td>{stats.CB}</td>
                           <td>
@@ -950,7 +1254,7 @@ const App = () => {
               {/* Company Detail Modal */}
               <Modal open={!!selectedCompany} onClose={() => setSelectedCompany(null)}>
                 {selectedCompany && (() => {
-                  const stats = companyHiringStats[selectedCompany.id] || { total: 0, CSE: 0, 'CSE-R': 0, ECE: 0, CB: 0, students: [] };
+                  const stats = companyHiringStats[selectedCompany.id] || { total: 0, CSE: 0, ECE: 0, CB: 0, OTHER: 0, students: [] };
                   return (
                     <div className="company-detail">
                       <h3>{selectedCompany.name}</h3>
@@ -1000,7 +1304,7 @@ const App = () => {
                           <div className="label">Total Hired</div>
                         </div>
                         <div className="hiring-stat">
-                          <div className="count">{stats.CSE + (stats['CSE-R'] || 0)}</div>
+                          <div className="count">{stats.CSE}</div>
                           <div className="label">CSE</div>
                         </div>
                         <div className="hiring-stat">
@@ -1051,7 +1355,7 @@ const App = () => {
           element={(
             <div className="container">
               <div className="section-header">
-                <h3>Students</h3>
+                <h3>Students · {activeBatch.label}</h3>
                 {isAdmin && (
                   <button onClick={() => { setEditStudent(null); setShowStudentModal(true); }}>Add Student</button>
                 )}
@@ -1067,11 +1371,10 @@ const App = () => {
                   onChange={(e) => setStudentSearch(e.target.value)}
                 />
                 <div className="filter-group">
-                  <label>Program:</label>
-                  <select value={studentFilters.program} onChange={(e) => setStudentFilters((f) => ({ ...f, program: e.target.value }))}>
+                  <label>Branch group:</label>
+                  <select value={studentFilters.branchGroup} onChange={(e) => setStudentFilters((f) => ({ ...f, branchGroup: e.target.value }))}>
                     <option value="">All</option>
                     <option value="CSE">CSE</option>
-                    <option value="CSE-R">CSE-R</option>
                     <option value="ECE">ECE</option>
                     <option value="CB">CB</option>
                   </select>
@@ -1094,6 +1397,32 @@ const App = () => {
                   </select>
                 </div>
               </div>
+
+              {availablePrograms.length > 0 && (
+                <div className="toolbar toolbar-programs">
+                  <span className="subtext">Programs</span>
+                  <div className="filter-chip-row">
+                    {availablePrograms.map((program) => {
+                      const isSelected = studentFilters.programs.includes(program);
+                      return (
+                        <button
+                          key={program}
+                          type="button"
+                          className={isSelected ? 'filter-chip active' : 'filter-chip'}
+                          onClick={() => toggleProgramFilter(program)}
+                        >
+                          {program}
+                        </button>
+                      );
+                    })}
+                    {!!studentFilters.programs.length && (
+                      <button type="button" className="secondary" onClick={() => setStudentFilters((f) => ({ ...f, programs: [] }))}>
+                        Clear programs
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <div className="card" style={{ overflowX: 'auto' }}>
                 <table className="table">

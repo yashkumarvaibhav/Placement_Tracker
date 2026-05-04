@@ -1,5 +1,11 @@
 import { Pool } from 'pg';
 import dns from 'dns/promises';
+import {
+  DEFAULT_BATCH_KEY,
+  getBatchConfig,
+  getBranchGroup,
+  normalizeBatchPayload,
+} from './batches.js';
 
 const ADMIN_TOKEN = 'admin-static-token';
 
@@ -155,12 +161,15 @@ export const initDb = async () => {
       eligible_cgpa DOUBLE PRECISION,
       backlog_allowed BOOLEAN DEFAULT false,
       registration_deadline TEXT,
-      offer_date TEXT
+      offer_date TEXT,
+      batch_key TEXT,
+      degree TEXT,
+      graduation_year INTEGER
     );`);
 
   await query(`CREATE TABLE IF NOT EXISTS students (
       id BIGSERIAL PRIMARY KEY,
-      roll_number TEXT UNIQUE NOT NULL,
+      roll_number TEXT NOT NULL,
       name TEXT NOT NULL,
       program TEXT NOT NULL,
       placement_status TEXT CHECK(placement_status IN ('Placed','Unplaced')) NOT NULL,
@@ -169,7 +178,10 @@ export const initDb = async () => {
       ctc DOUBLE PRECISION,
       stipend DOUBLE PRECISION,
       registration_deadline TEXT,
-      offer_date TEXT
+      offer_date TEXT,
+      batch_key TEXT,
+      degree TEXT,
+      graduation_year INTEGER
     );`);
 
   await query(`CREATE TABLE IF NOT EXISTS offers (
@@ -185,6 +197,24 @@ export const initDb = async () => {
 
   await query('CREATE INDEX IF NOT EXISTS idx_offers_student_id ON offers(student_id);');
   await query('CREATE INDEX IF NOT EXISTS idx_offers_company_id ON offers(company_id);');
+  await query('ALTER TABLE companies ADD COLUMN IF NOT EXISTS batch_key TEXT;');
+  await query('ALTER TABLE companies ADD COLUMN IF NOT EXISTS degree TEXT;');
+  await query('ALTER TABLE companies ADD COLUMN IF NOT EXISTS graduation_year INTEGER;');
+  await query('ALTER TABLE students ADD COLUMN IF NOT EXISTS batch_key TEXT;');
+  await query('ALTER TABLE students ADD COLUMN IF NOT EXISTS degree TEXT;');
+  await query('ALTER TABLE students ADD COLUMN IF NOT EXISTS graduation_year INTEGER;');
+  await query('ALTER TABLE students DROP CONSTRAINT IF EXISTS students_roll_number_key;');
+  await query(`UPDATE companies
+    SET batch_key = COALESCE(batch_key, 'mtech-2026'),
+        degree = COALESCE(degree, 'M.Tech'),
+        graduation_year = COALESCE(graduation_year, 2026)`);
+  await query(`UPDATE students
+    SET batch_key = COALESCE(batch_key, 'mtech-2026'),
+        degree = COALESCE(degree, 'M.Tech'),
+        graduation_year = COALESCE(graduation_year, 2026)`);
+  await query('CREATE INDEX IF NOT EXISTS idx_companies_batch_key ON companies(batch_key);');
+  await query('CREATE INDEX IF NOT EXISTS idx_students_batch_key ON students(batch_key);');
+  await query('CREATE UNIQUE INDEX IF NOT EXISTS idx_students_batch_roll_unique ON students(batch_key, roll_number);');
 };
 
 const backfillOffers = async () => {
@@ -211,8 +241,9 @@ const backfillOffers = async () => {
   }
 };
 
-export const listCompanies = async () => {
-  const { rows } = await query('SELECT * FROM companies ORDER BY name ASC');
+export const listCompanies = async (batchKey = DEFAULT_BATCH_KEY) => {
+  const resolvedBatch = getBatchConfig(batchKey);
+  const { rows } = await query('SELECT * FROM companies WHERE batch_key = $1 ORDER BY name ASC', [resolvedBatch.key]);
   return rows;
 };
 
@@ -222,9 +253,10 @@ export const getCompany = async (id) => {
 };
 
 export const createCompany = async (payload) => {
+  const batchData = normalizeBatchPayload(payload);
   const { rows } = await query(
-    `INSERT INTO companies (name, role, type, ctc, stipend, category, eligible_cgpa, backlog_allowed, registration_deadline, offer_date)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    `INSERT INTO companies (name, role, type, ctc, stipend, category, eligible_cgpa, backlog_allowed, registration_deadline, offer_date, batch_key, degree, graduation_year)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
      RETURNING *`,
     [
       payload.name,
@@ -237,15 +269,19 @@ export const createCompany = async (payload) => {
       payload.backlog_allowed ? true : false,
       payload.registration_deadline || null,
       payload.offer_date || null,
+      batchData.batch_key,
+      batchData.degree,
+      batchData.graduation_year,
     ]
   );
   return rows[0];
 };
 
 export const updateCompany = async (id, payload) => {
+  const batchData = normalizeBatchPayload(payload);
   const { rows } = await query(
-    `UPDATE companies SET name=$1, role=$2, type=$3, ctc=$4, stipend=$5, category=$6, eligible_cgpa=$7, backlog_allowed=$8, registration_deadline=$9, offer_date=$10
-     WHERE id=$11 RETURNING *`,
+    `UPDATE companies SET name=$1, role=$2, type=$3, ctc=$4, stipend=$5, category=$6, eligible_cgpa=$7, backlog_allowed=$8, registration_deadline=$9, offer_date=$10, batch_key=$11, degree=$12, graduation_year=$13
+     WHERE id=$14 RETURNING *`,
     [
       payload.name,
       payload.role || '',
@@ -257,6 +293,9 @@ export const updateCompany = async (id, payload) => {
       payload.backlog_allowed ? true : false,
       payload.registration_deadline || null,
       payload.offer_date || null,
+      batchData.batch_key,
+      batchData.degree,
+      batchData.graduation_year,
       id,
     ]
   );
@@ -267,18 +306,35 @@ export const deleteCompany = async (id) => {
   await query('DELETE FROM companies WHERE id=$1', [id]);
 };
 
-const fetchStudentWithCompanies = async (where = '', params = []) => {
+const fetchStudentWithCompanies = async ({ studentId = null, batchKey = DEFAULT_BATCH_KEY } = {}) => {
+  const params = [];
+  const whereParts = [];
+
+  if (batchKey) {
+    params.push(getBatchConfig(batchKey).key);
+    whereParts.push(`s.batch_key = $${params.length}`);
+  }
+
+  if (studentId !== null) {
+    params.push(studentId);
+    whereParts.push(`s.id = $${params.length}`);
+  }
+
+  const whereClause = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
+
   const { rows: students } = await query(
     `SELECT s.*, c.name as company_name, c.category as company_category, c.type as company_type, c.ctc as company_ctc, c.stipend as company_stipend
      FROM students s
      LEFT JOIN companies c ON s.company_id = c.id
-     ${where}
+     ${whereClause}
      ORDER BY s.roll_number ASC`,
     params
   );
 
   const studentIds = students.map((s) => s.id);
-  if (!studentIds.length) return students.map((s) => ({ ...s, offers: [] }));
+  if (!studentIds.length) {
+    return students.map((s) => ({ ...s, offers: [], branch_group: getBranchGroup(s.program) }));
+  }
 
   const { rows: offers } = await query(
     `SELECT o.*, co.name as company_name, co.category as company_category, co.type as company_type, co.ctc as company_ctc, co.stipend as company_stipend
@@ -294,13 +350,13 @@ const fetchStudentWithCompanies = async (where = '', params = []) => {
     return acc;
   }, {});
 
-  return students.map((s) => ({ ...s, offers: offersByStudent[s.id] || [] }));
+  return students.map((s) => ({ ...s, offers: offersByStudent[s.id] || [], branch_group: getBranchGroup(s.program) }));
 };
 
-export const listStudents = () => fetchStudentWithCompanies();
+export const listStudents = (batchKey = DEFAULT_BATCH_KEY) => fetchStudentWithCompanies({ batchKey });
 
 export const getStudent = async (id) => {
-  const students = await fetchStudentWithCompanies('WHERE s.id = $1', [id]);
+  const students = await fetchStudentWithCompanies({ studentId: id, batchKey: null });
   return students[0];
 };
 
@@ -328,10 +384,11 @@ export const createStudent = async (payload) => {
   const isPlaced = payload.placement_status === 'Placed';
   const primaryCompany = isPlaced ? (payload.offers?.[0]?.company_id || payload.company_id || null) : null;
   const primaryOfferType = isPlaced ? (payload.offers?.[0]?.offer_type || payload.offer_type || null) : null;
+  const batchData = normalizeBatchPayload(payload);
 
   const { rows } = await query(
-    `INSERT INTO students (roll_number, name, program, placement_status, company_id, offer_type, ctc, stipend, registration_deadline, offer_date)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    `INSERT INTO students (roll_number, name, program, placement_status, company_id, offer_type, ctc, stipend, registration_deadline, offer_date, batch_key, degree, graduation_year)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
      RETURNING id`,
     [
       payload.roll_number,
@@ -344,6 +401,9 @@ export const createStudent = async (payload) => {
       isPlaced ? payload.stipend ?? null : null,
       isPlaced ? payload.registration_deadline || null : null,
       isPlaced ? payload.offer_date || null : null,
+      batchData.batch_key,
+      batchData.degree,
+      batchData.graduation_year,
     ]
   );
 
@@ -356,10 +416,11 @@ export const updateStudent = async (id, payload) => {
   const isPlaced = payload.placement_status === 'Placed';
   const primaryCompany = isPlaced ? (payload.offers?.[0]?.company_id || payload.company_id || null) : null;
   const primaryOfferType = isPlaced ? (payload.offers?.[0]?.offer_type || payload.offer_type || null) : null;
+  const batchData = normalizeBatchPayload(payload);
 
   await query(
-    `UPDATE students SET roll_number=$1, name=$2, program=$3, placement_status=$4, company_id=$5, offer_type=$6, ctc=$7, stipend=$8, registration_deadline=$9, offer_date=$10
-     WHERE id=$11`,
+    `UPDATE students SET roll_number=$1, name=$2, program=$3, placement_status=$4, company_id=$5, offer_type=$6, ctc=$7, stipend=$8, registration_deadline=$9, offer_date=$10, batch_key=$11, degree=$12, graduation_year=$13
+     WHERE id=$14`,
     [
       payload.roll_number,
       payload.name,
@@ -371,6 +432,9 @@ export const updateStudent = async (id, payload) => {
       isPlaced ? payload.stipend ?? null : null,
       isPlaced ? payload.registration_deadline || null : null,
       isPlaced ? payload.offer_date || null : null,
+      batchData.batch_key,
+      batchData.degree,
+      batchData.graduation_year,
       id,
     ]
   );
@@ -384,19 +448,68 @@ export const deleteStudent = async (id) => {
   await query('DELETE FROM students WHERE id=$1', [id]);
 };
 
-export const buildStats = async () => {
-  const companies = await listCompanies();
-  const students = await listStudents();
+export const buildStats = async (batchKey = DEFAULT_BATCH_KEY) => {
+  const batch = getBatchConfig(batchKey);
+  const companies = await listCompanies(batch.key);
+  const students = await listStudents(batch.key);
+
+  const studentIds = students.map((student) => student.id);
+  if (!studentIds.length) {
+    const empty = {
+      total_students: 0,
+      placed_students: 0,
+      total_offers: 0,
+      total_intern_offers: 0,
+      total_fte_offers: 0,
+      total_combo_offers: 0,
+      total_Aplus_offers: 0,
+      total_A_offers: 0,
+      total_B_offers: 0,
+      highest_ctc: null,
+      average_ctc: null,
+      median_ctc: null,
+      highest_stipend: null,
+      average_stipend: null,
+      median_stipend: null,
+      placement_percentage: 0,
+      internship_percentage: 0,
+      fte_percentage: 0,
+    };
+    return {
+      batch,
+      number_of_companies: companies.length,
+      total_offers: 0,
+      total_intern_offers: 0,
+      total_fte_offers: 0,
+      total_combo_offers: 0,
+      total_Aplus_offers: 0,
+      total_A_offers: 0,
+      total_B_offers: 0,
+      highest_ctc: null,
+      lowest_ctc: null,
+      average_ctc: null,
+      median_ctc: null,
+      highest_stipend: null,
+      lowest_stipend: null,
+      average_stipend: null,
+      median_stipend: null,
+      fte_percentage: 0,
+      internship_percentage: 0,
+      overall_placement_percentage: 0,
+      total_students: 0,
+      total_placed_students: 0,
+      available_programs: [],
+      branch_summary: { overall: empty, cse: empty, ece: empty, cb: empty },
+    };
+  }
 
   const { rows: offers } = await query(
     `SELECT o.*, c.category as company_category, c.type as company_type, c.ctc as company_ctc, c.stipend as company_stipend
      FROM offers o
      JOIN companies c ON o.company_id = c.id`
+     + ` WHERE o.student_id = ANY($1::bigint[])`,
+    [studentIds]
   );
-
-  const internOffers = offers.filter((o) => (o.offer_type || '').includes('Intern') && o.offer_type !== 'Intern+FTE');
-  const fteOffers = offers.filter((o) => o.offer_type === 'FTE');
-  const comboOffers = offers.filter((o) => o.offer_type === 'Intern+FTE');
 
   const studentProgramMap = students.reduce((acc, s) => {
     acc[s.id] = s.program;
@@ -416,12 +529,11 @@ export const buildStats = async () => {
 
   const toPct = (num, den) => (den ? Number(((num / den) * 100).toFixed(2)) : 0);
 
-  const summarize = (subset, programs = null) => {
+  const summarize = (subset, offerProgramFilter = null) => {
     const total = subset.length;
     const placed = subset.filter((s) => s.placement_status === 'Placed').length;
-    const programSet = programs ? new Set(programs) : null;
-    const offersSubset = programSet
-      ? offersWithProgram.filter((o) => programSet.has(o.program))
+    const offersSubset = offerProgramFilter
+      ? offersWithProgram.filter((o) => offerProgramFilter(o.program))
       : offersWithProgram;
 
     const internSub = offersSubset.filter((o) => (o.offer_type || '').includes('Intern') && o.offer_type !== 'Intern+FTE');
@@ -470,11 +582,12 @@ export const buildStats = async () => {
   };
 
   const totalStudents = students.length;
+  const inBranch = (branchGroup) => (program) => getBranchGroup(program) === branchGroup;
   const branchSummary = {
     overall: summarize(students),
-    cse: summarize(students.filter((s) => s.program === 'CSE' || s.program === 'CSE-R'), ['CSE', 'CSE-R']),
-    ece: summarize(students.filter((s) => s.program === 'ECE'), ['ECE']),
-    cb: summarize(students.filter((s) => s.program === 'CB'), ['CB']),
+    cse: summarize(students.filter((s) => getBranchGroup(s.program) === 'CSE'), inBranch('CSE')),
+    ece: summarize(students.filter((s) => getBranchGroup(s.program) === 'ECE'), inBranch('ECE')),
+    cb: summarize(students.filter((s) => getBranchGroup(s.program) === 'CB'), inBranch('CB')),
   };
 
   const overall = branchSummary.overall;
@@ -483,6 +596,7 @@ export const buildStats = async () => {
   const internCount = overall.total_intern_offers;
 
   return {
+    batch,
     number_of_companies: companies.length,
     total_offers: overall.total_offers,
     total_intern_offers: overall.total_intern_offers,
@@ -504,6 +618,7 @@ export const buildStats = async () => {
     overall_placement_percentage: toPct(placedCount, totalStudents),
     total_students: totalStudents,
     total_placed_students: placedCount,
+    available_programs: [...new Set(students.map((student) => student.program).filter(Boolean))].sort(),
     branch_summary: branchSummary,
   };
 };
