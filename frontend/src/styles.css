@@ -118,6 +118,42 @@ header {
   background: rgba(255, 255, 255, 0.92);
 }
 
+.nav-toggle {
+  display: none;
+  margin-left: auto;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid var(--border);
+  box-shadow: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nav-toggle span {
+  width: 18px;
+  height: 2px;
+  border-radius: 999px;
+  background: #1f6f6b;
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+
+.nav-toggle.active span:nth-child(1) {
+  transform: translateY(6px) rotate(45deg);
+}
+
+.nav-toggle.active span:nth-child(2) {
+  opacity: 0;
+}
+
+.nav-toggle.active span:nth-child(3) {
+  transform: translateY(-6px) rotate(-45deg);
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -759,6 +795,69 @@ form {
 }
 
 @media (max-width: 900px) {
+  header.header-nav-open {
+    transform: translateY(0);
+  }
+
+  .navbar {
+    gap: 12px;
+  }
+
+  .nav-toggle {
+    display: inline-flex;
+  }
+
+  .nav-brand-row {
+    align-items: center;
+    flex-wrap: nowrap;
+  }
+
+  .nav-main-links,
+  .nav-user-row {
+    display: none;
+  }
+
+  header.header-nav-open .nav-main-links,
+  header.header-nav-open .nav-user-row {
+    display: flex;
+  }
+
+  .nav-main-links {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding-top: 4px;
+  }
+
+  .nav-main-links a,
+  .nav-admin-link {
+    width: 100%;
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.94);
+  }
+
+  .nav-user-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+
+  .nav-user-email {
+    padding-inline: 2px;
+  }
+
+  .nav-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .nav-actions button,
+  .nav-actions .nav-admin-link {
+    width: 100%;
+  }
 
   .container {
     padding: 18px;
@@ -803,8 +902,8 @@ form {
   }
 
   .nav-brand-row {
-    align-items: flex-start;
-    flex-wrap: wrap;
+    align-items: center;
+    flex-wrap: nowrap;
   }
 
   .nav-main-links a,

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
-import { Link, Route, Routes, useNavigate } from 'react-router-dom';
+import { Link, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { GoogleLogin } from '@react-oauth/google';
 import {
   BATCHES,
@@ -513,6 +513,7 @@ const useAdminHeaders = (token) => useMemo(() => ({ headers: { Authorization: `B
 
 const App = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [token, setToken] = useState(localStorage.getItem('adminToken') || '');
   const [googleEmail, setGoogleEmail] = useState(localStorage.getItem('googleEmail') || '');
   const [activeBatchKey, setActiveBatchKey] = useState(localStorage.getItem('activeBatchKey') || DEFAULT_BATCH_KEY);
@@ -595,6 +596,7 @@ const App = () => {
   const [studentFilters, setStudentFilters] = useState({ branchGroup: '', programs: [], status: '', offerType: '' });
   const [dashboardBranchFilter, setDashboardBranchFilter] = useState('ALL');
   const [mobileHeaderHidden, setMobileHeaderHidden] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
     localStorage.setItem('activeBatchKey', activeBatch.key);
@@ -604,7 +606,13 @@ const App = () => {
     setCompanySearch('');
     setStudentSearch('');
     setSelectedCompany(null);
+    setMobileNavOpen(false);
   }, [activeBatch.key]);
+
+  useEffect(() => {
+    setMobileNavOpen(false);
+    setMobileHeaderHidden(false);
+  }, [location.pathname]);
 
   useEffect(() => {
     if (!isGoogleAuthed || typeof window === 'undefined') {
@@ -620,7 +628,7 @@ const App = () => {
       const currentScrollY = window.scrollY;
       const delta = currentScrollY - lastScrollY;
 
-      if (!mobileMedia.matches || currentScrollY <= 24) {
+      if (!mobileMedia.matches || mobileNavOpen || currentScrollY <= 24) {
         setMobileHeaderHidden(false);
       } else if (delta > 8 && currentScrollY > 120) {
         setMobileHeaderHidden(true);
@@ -664,7 +672,41 @@ const App = () => {
         mobileMedia.removeListener(handleViewportChange);
       }
     };
-  }, [isGoogleAuthed]);
+  }, [isGoogleAuthed, mobileNavOpen]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+
+    const drawerMedia = window.matchMedia('(min-width: 901px)');
+    const handleViewportChange = (event) => {
+      if (event.matches) {
+        setMobileNavOpen(false);
+      }
+    };
+
+    if (drawerMedia.addEventListener) {
+      drawerMedia.addEventListener('change', handleViewportChange);
+    } else {
+      drawerMedia.addListener(handleViewportChange);
+    }
+
+    return () => {
+      if (drawerMedia.removeEventListener) {
+        drawerMedia.removeEventListener('change', handleViewportChange);
+      } else {
+        drawerMedia.removeListener(handleViewportChange);
+      }
+    };
+  }, []);
+
+  const toggleMobileNav = () => {
+    setMobileHeaderHidden(false);
+    setMobileNavOpen((previous) => !previous);
+  };
+
+  const closeMobileNav = () => {
+    setMobileNavOpen(false);
+  };
 
   const availablePrograms = useMemo(
     () => sortPrograms([...new Set((stats.available_programs || students.map((student) => student.program)).filter(Boolean))]),
@@ -960,30 +1002,45 @@ const App = () => {
 
   return (
     <>
-      <header className={mobileHeaderHidden ? 'header-hidden' : ''}>
+      <header className={[
+        mobileHeaderHidden && !mobileNavOpen ? 'header-hidden' : '',
+        mobileNavOpen ? 'header-nav-open' : '',
+      ].filter(Boolean).join(' ')}>
         <div className="navbar">
           <div className="nav-brand-row">
             <div className="flex-row nav-logo" style={{ alignItems: 'center' }}>
               <img src={`${assetBase}iiitd_logo.png`} alt="IIIT Delhi logo" />
             </div>
             <span className="badge nav-batch-badge">{activeBatch.label}</span>
+            <button
+              type="button"
+              className={mobileNavOpen ? 'nav-toggle active' : 'nav-toggle'}
+              aria-label={mobileNavOpen ? 'Close navigation menu' : 'Open navigation menu'}
+              aria-expanded={mobileNavOpen}
+              aria-controls="primary-navigation"
+              onClick={toggleMobileNav}
+            >
+              <span />
+              <span />
+              <span />
+            </button>
           </div>
 
-          <div className="nav-main-links">
-            <Link to="/">Dashboard</Link>
-            <Link to="/companies">Companies</Link>
-            <Link to="/students">Students</Link>
+          <div id="primary-navigation" className="nav-main-links">
+            <Link to="/" onClick={closeMobileNav}>Dashboard</Link>
+            <Link to="/companies" onClick={closeMobileNav}>Companies</Link>
+            <Link to="/students" onClick={closeMobileNav}>Students</Link>
           </div>
 
           <div className="nav-user-row">
             {googleEmail && <span className="subtext nav-user-email">{googleEmail}</span>}
             <div className="nav-actions">
-              <button className="secondary" onClick={handleGoogleLogout}>Sign out</button>
-            {isAdmin ? (
-                <button className="secondary" onClick={() => { setToken(''); localStorage.removeItem('adminToken'); navigate('/'); }}>Logout</button>
-            ) : (
-                <Link className="nav-admin-link" to="/admin">Admin Login</Link>
-            )}
+              <button className="secondary" onClick={() => { closeMobileNav(); handleGoogleLogout(); }}>Sign out</button>
+              {isAdmin ? (
+                <button className="secondary" onClick={() => { closeMobileNav(); setToken(''); localStorage.removeItem('adminToken'); navigate('/'); }}>Logout</button>
+              ) : (
+                <Link className="nav-admin-link" to="/admin" onClick={closeMobileNav}>Admin Login</Link>
+              )}
             </div>
           </div>
         </div>
