@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "import:batches": "node scripts/import-batches.js"
+    "import:batches": "node scripts/import-batches.js",
+    "import:btech-latest": "node scripts/import-btech-latest-placements.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.78.0",
