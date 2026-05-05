@@ -133,10 +133,14 @@ const buildProgramSummaries = (students) => {
 
   const average = (values) => (values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null);
   const toPct = (value, total) => (total ? Number(((value / total) * 100).toFixed(2)) : 0);
+  const isIncludedInPlacementRate = (student) => !['not sitting', 'ineligible'].includes(
+    String(student?.placement_status || '').trim().toLowerCase()
+  );
 
   const summarize = (subset, offerProgramFilter) => {
     const total = subset.length;
     const placed = subset.filter((student) => student.placement_status === 'Placed').length;
+    const placementEligibleTotal = subset.filter(isIncludedInPlacementRate).length;
     const offersSubset = offersWithProgram.filter((offer) => offerProgramFilter(offer.program));
     const internOffers = offersSubset.filter((offer) => (offer.offer_type || '').includes('Intern') && offer.offer_type !== 'Intern+FTE');
     const fteOffers = offersSubset.filter((offer) => offer.offer_type === 'FTE');
@@ -176,7 +180,7 @@ const buildProgramSummaries = (students) => {
       highest_stipend: stipendValues.length ? Math.max(...stipendValues) : null,
       average_stipend: average(stipendValues),
       median_stipend: median(stipendValues),
-      placement_percentage: toPct(placed, total),
+      placement_percentage: toPct(placed, placementEligibleTotal),
       internship_percentage: toPct(internshipCount, total),
       fte_percentage: toPct(fteCount, total),
     };
