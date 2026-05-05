@@ -65,6 +65,9 @@ const MetricLabel = ({ metricKey, children }) => (
 
 const BRANCH_GROUP_ORDER = { CSE: 0, ECE: 1, CB: 2, OTHER: 3 };
 const STUDENT_STATUS_OPTIONS = ['Placed', 'Unplaced', 'Ineligible', 'Not Sitting'];
+const isPlacementEligibleStudent = (student) => !['not sitting', 'ineligible'].includes(
+  String(student?.placement_status || '').trim().toLowerCase()
+);
 
 const DASHBOARD_BRANCH_LABELS = {
   ALL: 'All programs',
@@ -76,7 +79,10 @@ const DASHBOARD_BRANCH_LABELS = {
 
 const EMPTY_SLICE_SUMMARY = {
   total_students: 0,
+  eligible_students: 0,
+  excluded_students: 0,
   placed_students: 0,
+  unplaced_students: 0,
   total_offers: 0,
   total_intern_offers: 0,
   total_fte_offers: 0,
@@ -134,14 +140,13 @@ const buildProgramSummaries = (students) => {
 
   const average = (values) => (values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null);
   const toPct = (value, total) => (total ? Number(((value / total) * 100).toFixed(2)) : 0);
-  const isIncludedInPlacementRate = (student) => !['not sitting', 'ineligible'].includes(
-    String(student?.placement_status || '').trim().toLowerCase()
-  );
 
   const summarize = (subset, offerProgramFilter) => {
     const total = subset.length;
     const placed = subset.filter((student) => student.placement_status === 'Placed').length;
-    const placementEligibleTotal = subset.filter(isIncludedInPlacementRate).length;
+    const placementEligibleTotal = subset.filter(isPlacementEligibleStudent).length;
+    const excludedStudents = Math.max(total - placementEligibleTotal, 0);
+    const unplacedStudents = Math.max(placementEligibleTotal - placed, 0);
     const offersSubset = offersWithProgram.filter((offer) => offerProgramFilter(offer.program));
     const internOffers = offersSubset.filter((offer) => (offer.offer_type || '').includes('Intern') && offer.offer_type !== 'Intern+FTE');
     const fteOffers = offersSubset.filter((offer) => offer.offer_type === 'FTE');
@@ -167,7 +172,10 @@ const buildProgramSummaries = (students) => {
 
     return {
       total_students: total,
+      eligible_students: placementEligibleTotal,
+      excluded_students: excludedStudents,
       placed_students: placed,
+      unplaced_students: unplacedStudents,
       total_offers: offersSubset.length,
       total_intern_offers: internOffers.length,
       total_fte_offers: fteCount,
@@ -929,6 +937,8 @@ const App = () => {
 
   const studentOverview = useMemo(() => {
     const placed = filteredStudents.filter((student) => student.placement_status === 'Placed').length;
+    const eligible = filteredStudents.filter(isPlacementEligibleStudent).length;
+    const excluded = Math.max(filteredStudents.length - eligible, 0);
     const internships = filteredStudents.filter((student) => {
       if (student.offers?.length) {
         return student.offers.some((offer) => offer.offer_type === 'Intern' || offer.offer_type === 'Intern+FTE');
@@ -938,8 +948,10 @@ const App = () => {
 
     return {
       total: filteredStudents.length,
+      eligible,
+      excluded,
       placed,
-      unplaced: Math.max(filteredStudents.length - placed, 0),
+      unplaced: Math.max(eligible - placed, 0),
       internships,
       programs: new Set(filteredStudents.map((student) => student.program).filter(Boolean)).size,
     };
@@ -1182,8 +1194,10 @@ const App = () => {
                 {[{ key: 'overall', title: 'Overall', variant: 'large' }].map((section) => {
                   const data = activeOverviewSummary;
                   const metrics = [
-                    { key: 'total_students', label: 'Total Students', value: data.total_students },
-                    { key: 'placed_students', label: 'Total Placed', value: data.placed_students },
+                    { key: 'eligible_students', label: 'Eligible & Sitting', value: data.eligible_students },
+                    { key: 'placed_students', label: 'Placed', value: data.placed_students },
+                    { key: 'unplaced_students', label: 'Unplaced (Eligible)', value: data.unplaced_students },
+                    { key: 'excluded_students', label: 'Excluded', value: data.excluded_students },
                     { key: 'total_intern_offers', label: 'Intern Offers', value: data.total_intern_offers },
                     { key: 'total_fte_offers', label: 'FTE Offers', value: data.total_fte_offers },
                     { key: 'total_combo_offers', label: 'Intern+FTE Offers', value: data.total_combo_offers },
@@ -1256,8 +1270,10 @@ const App = () => {
                     <div className="program-summary-grid">
                       {filteredProgramSummaries.map(({ program, branchGroup, summary }) => {
                         const metrics = [
-                          { key: 'total_students', label: 'Total Students', value: summary.total_students },
-                          { key: 'placed_students', label: 'Total Placed', value: summary.placed_students },
+                          { key: 'eligible_students', label: 'Eligible & Sitting', value: summary.eligible_students },
+                          { key: 'placed_students', label: 'Placed', value: summary.placed_students },
+                          { key: 'unplaced_students', label: 'Unplaced (Eligible)', value: summary.unplaced_students },
+                          { key: 'excluded_students', label: 'Excluded', value: summary.excluded_students },
                           { key: 'total_intern_offers', label: 'Intern Offers', value: summary.total_intern_offers },
                           { key: 'total_fte_offers', label: 'FTE Offers', value: summary.total_fte_offers },
                           { key: 'total_combo_offers', label: 'Intern+FTE Offers', value: summary.total_combo_offers },
@@ -1589,12 +1605,16 @@ const App = () => {
                   <div className="section-summary-card">
                     <div className="section-summary-label">Visible Students</div>
                     <div className="section-summary-value">{studentOverview.total}</div>
-                    <div className="section-summary-footnote">Filtered live from this cohort</div>
+                    <div className="section-summary-footnote">
+                      {studentOverview.excluded
+                        ? `${studentOverview.excluded} marked Ineligible or Not Sitting`
+                        : 'All visible students count toward placement stats'}
+                    </div>
                   </div>
                   <div className="section-summary-card">
                     <div className="section-summary-label">Placed</div>
                     <div className="section-summary-value">{studentOverview.placed}</div>
-                    <div className="section-summary-footnote">{studentOverview.unplaced} still unplaced</div>
+                    <div className="section-summary-footnote">{studentOverview.unplaced} eligible & sitting still unplaced</div>
                   </div>
                   <div className="section-summary-card">
                     <div className="section-summary-label">Programs Visible</div>

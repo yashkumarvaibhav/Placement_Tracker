@@ -622,7 +622,7 @@ form {
 }
 
 .dashboard-overview-card {
-  overflow: hidden;
+  overflow: visible;
   background: linear-gradient(135deg, var(--accent-soft), var(--panel-strong));
 }
 

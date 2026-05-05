@@ -434,6 +434,8 @@ export const buildStats = async (batchKey = DEFAULT_BATCH_KEY) => {
         const total = subset.length;
         const placed = subset.filter((s) => s.placement_status === 'Placed').length;
         const placementEligibleTotal = subset.filter(isIncludedInPlacementRate).length;
+        const excludedStudents = Math.max(total - placementEligibleTotal, 0);
+        const unplacedStudents = Math.max(placementEligibleTotal - placed, 0);
         const offersSubset = offerProgramFilter
             ? offersWithProgram.filter((o) => offerProgramFilter(o.program))
             : offersWithProgram;
@@ -463,7 +465,10 @@ export const buildStats = async (batchKey = DEFAULT_BATCH_KEY) => {
 
         return {
             total_students: total,
+            eligible_students: placementEligibleTotal,
+            excluded_students: excludedStudents,
             placed_students: placed,
+            unplaced_students: unplacedStudents,
             total_offers: offersSubset.length,
             total_intern_offers: internSub.length,
             total_fte_offers: fteSub.length + comboSub.length,
@@ -485,6 +490,7 @@ export const buildStats = async (batchKey = DEFAULT_BATCH_KEY) => {
 
     const totalStudents = students.length;
     const placementEligibleStudents = students.filter(isIncludedInPlacementRate).length;
+    const excludedStudents = Math.max(totalStudents - placementEligibleStudents, 0);
     const inBranch = (branchGroup) => (program) => getBranchGroup(program) === branchGroup;
     const branchSummary = {
         overall: summarize(students),
@@ -495,6 +501,7 @@ export const buildStats = async (batchKey = DEFAULT_BATCH_KEY) => {
 
     const overall = branchSummary.overall;
     const placedCount = overall.placed_students;
+    const unplacedCount = overall.unplaced_students;
     const fteCount = overall.total_fte_offers;
     const internCount = overall.total_intern_offers;
 
@@ -520,6 +527,9 @@ export const buildStats = async (batchKey = DEFAULT_BATCH_KEY) => {
         internship_percentage: toPct(internCount, totalStudents),
         overall_placement_percentage: toPct(placedCount, placementEligibleStudents),
         total_students: totalStudents,
+        eligible_students: placementEligibleStudents,
+        excluded_students: excludedStudents,
+        unplaced_students: unplacedCount,
         total_placed_students: placedCount,
         available_programs: [...new Set(students.map((student) => student.program).filter(Boolean))].sort(),
         branch_summary: branchSummary,
