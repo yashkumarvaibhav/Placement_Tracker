@@ -172,7 +172,7 @@ export const initDb = async () => {
       roll_number TEXT NOT NULL,
       name TEXT NOT NULL,
       program TEXT NOT NULL,
-      placement_status TEXT CHECK(placement_status IN ('Placed','Unplaced')) NOT NULL,
+      placement_status TEXT CHECK(placement_status IN ('Placed','Unplaced','Ineligible','Not Sitting')) NOT NULL,
       company_id BIGINT REFERENCES companies(id),
       offer_type TEXT,
       ctc DOUBLE PRECISION,
@@ -204,6 +204,10 @@ export const initDb = async () => {
   await query('ALTER TABLE students ADD COLUMN IF NOT EXISTS degree TEXT;');
   await query('ALTER TABLE students ADD COLUMN IF NOT EXISTS graduation_year INTEGER;');
   await query('ALTER TABLE students DROP CONSTRAINT IF EXISTS students_roll_number_key;');
+  await query('ALTER TABLE students DROP CONSTRAINT IF EXISTS students_placement_status_check;');
+  await query(`ALTER TABLE students
+    ADD CONSTRAINT students_placement_status_check
+    CHECK(placement_status IN ('Placed','Unplaced','Ineligible','Not Sitting'));`);
   await query(`UPDATE companies
     SET batch_key = COALESCE(batch_key, 'mtech-2026'),
         degree = COALESCE(degree, 'M.Tech'),
