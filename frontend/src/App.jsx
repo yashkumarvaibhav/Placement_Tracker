@@ -64,6 +64,7 @@ const MetricLabel = ({ metricKey, children }) => (
 );
 
 const BRANCH_GROUP_ORDER = { CSE: 0, ECE: 1, CB: 2, OTHER: 3 };
+const STUDENT_STATUS_OPTIONS = ['Placed', 'Unplaced', 'Ineligible', 'Not Sitting'];
 
 const DASHBOARD_BRANCH_LABELS = {
   ALL: 'All programs',
@@ -443,9 +444,10 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
             name="placement_status"
             value={form.placement_status}
             onChange={(e) => {
+              const nextStatus = e.target.value;
               handleChange(e);
-              if (e.target.value === 'Unplaced') {
-                // Clear any existing offers/primary company details when marking unplaced
+              if (nextStatus !== 'Placed') {
+                // Clear any existing offers/primary company details for non-placed statuses.
                 setForm((prev) => ({
                   ...prev,
                   offers: [],
@@ -459,8 +461,9 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
               } else if (!form.offers?.length) addOffer();
             }}
           >
-            <option>Placed</option>
-            <option>Unplaced</option>
+            {STUDENT_STATUS_OPTIONS.map((status) => (
+              <option key={status} value={status}>{status}</option>
+            ))}
           </select>
         </div>
         {placed && (
@@ -1632,8 +1635,9 @@ const App = () => {
                   <label>Status:</label>
                   <select value={studentFilters.status} onChange={(e) => setStudentFilters((f) => ({ ...f, status: e.target.value }))}>
                     <option value="">All</option>
-                    <option value="Placed">Placed</option>
-                    <option value="Unplaced">Unplaced</option>
+                    {STUDENT_STATUS_OPTIONS.map((status) => (
+                      <option key={status} value={status}>{status}</option>
+                    ))}
                   </select>
                 </div>
                 <div className="filter-group">
