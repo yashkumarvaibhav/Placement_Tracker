@@ -52,8 +52,8 @@ export const getBranchGroup = (programRaw = '') => {
 export const METRIC_DEFINITIONS = {
   number_of_companies: 'Companies listed for the selected batch only. Because companies are batch-specific in this site, the same company can appear in multiple batches separately.',
   total_offers: 'All recorded offer rows for the selected batch. If one student has multiple offers, each offer is counted separately.',
-  overall_placement_percentage: 'Placed students divided by total students in the selected batch, based on the placement_status stored in this site.',
-  total_students: 'Students currently present in this batch roster on the site. For the newly added batches, this comes from placement-registration rosters.',
+  overall_placement_percentage: 'Placed students divided by the placement-eligible students in the selected batch. Students marked Not Sitting or Ineligible are excluded from this denominator.',
+  total_students: 'Students currently present in this batch roster on the site. For the newly added batches, this comes from placement-registration rosters and may include students excluded from placement-rate denominators.',
   placed_students: 'Students marked as Placed in this batch. A student is considered placed by the site when their placement_status is set to Placed.',
   total_intern_offers: 'Offer rows tagged as Intern only for the selected cohort.',
   total_fte_offers: 'Offer rows counted as full-time outcomes in this site. Intern+FTE rows are included here as well.',
@@ -67,7 +67,7 @@ export const METRIC_DEFINITIONS = {
   highest_stipend: 'Highest stipend among offers in this cohort. If an offer-specific stipend is missing, the site falls back to the linked company stipend.',
   average_stipend: 'Average of all available stipend values across offers in this cohort, using offer stipend first and company stipend as fallback.',
   median_stipend: 'Median of all available stipend values across offers in this cohort, using offer stipend first and company stipend as fallback.',
-  placement_percentage: 'Placed students divided by total students inside the currently shown branch slice.',
+  placement_percentage: 'Placed students divided by the placement-eligible students inside the currently shown branch slice. Students marked Not Sitting or Ineligible are excluded from this denominator.',
   internship_percentage: 'Intern and Intern+FTE offer count divided by total students in the currently shown slice. This is an offer-rate metric in this site, not a unique-student metric.',
   fte_percentage: 'FTE and Intern+FTE offer count divided by total students in the currently shown slice. This is an offer-rate metric in this site, not a unique-student metric.',
 };

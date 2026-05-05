@@ -426,9 +426,14 @@ export const buildStats = async (batchKey = DEFAULT_BATCH_KEY) => {
     const average = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
     const toPct = (num, den) => (den ? Number(((num / den) * 100).toFixed(2)) : 0);
 
+    const isIncludedInPlacementRate = (student) => !['not sitting', 'ineligible'].includes(
+        String(student?.placement_status || '').trim().toLowerCase()
+    );
+
     const summarize = (subset, offerProgramFilter = null) => {
         const total = subset.length;
         const placed = subset.filter((s) => s.placement_status === 'Placed').length;
+        const placementEligibleTotal = subset.filter(isIncludedInPlacementRate).length;
         const offersSubset = offerProgramFilter
             ? offersWithProgram.filter((o) => offerProgramFilter(o.program))
             : offersWithProgram;
@@ -472,13 +477,14 @@ export const buildStats = async (batchKey = DEFAULT_BATCH_KEY) => {
             highest_stipend: stipendValues.length ? Math.max(...stipendValues) : null,
             average_stipend: average(stipendValues),
             median_stipend: median(stipendValues),
-            placement_percentage: toPct(placed, total),
+            placement_percentage: toPct(placed, placementEligibleTotal),
             internship_percentage: toPct(internCount, total),
             fte_percentage: toPct(fteCount, total),
         };
     };
 
     const totalStudents = students.length;
+    const placementEligibleStudents = students.filter(isIncludedInPlacementRate).length;
     const inBranch = (branchGroup) => (program) => getBranchGroup(program) === branchGroup;
     const branchSummary = {
         overall: summarize(students),
@@ -512,7 +518,7 @@ export const buildStats = async (batchKey = DEFAULT_BATCH_KEY) => {
         median_stipend: overall.median_stipend,
         fte_percentage: toPct(fteCount, totalStudents),
         internship_percentage: toPct(internCount, totalStudents),
-        overall_placement_percentage: toPct(placedCount, totalStudents),
+        overall_placement_percentage: toPct(placedCount, placementEligibleStudents),
         total_students: totalStudents,
         total_placed_students: placedCount,
         available_programs: [...new Set(students.map((student) => student.program).filter(Boolean))].sort(),
