@@ -14,6 +14,41 @@ import {
 const api = axios.create({ baseURL: import.meta.env.VITE_API_BASE || '/api' });
 const assetBase = import.meta.env.BASE_URL || '/';
 
+const getBatchCacheKey = (batchKey) => `placementSnapshot:${batchKey}`;
+
+const readBatchCache = (batchKey) => {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const raw = window.localStorage.getItem(getBatchCacheKey(batchKey));
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+
+    return {
+      stats: parsed.stats && typeof parsed.stats === 'object' ? parsed.stats : {},
+      companies: Array.isArray(parsed.companies) ? parsed.companies : [],
+      students: Array.isArray(parsed.students) ? parsed.students : [],
+    };
+  } catch {
+    return null;
+  }
+};
+
+const writeBatchCache = (batchKey, snapshot) => {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(getBatchCacheKey(batchKey), JSON.stringify({
+      ...snapshot,
+      cachedAt: new Date().toISOString(),
+    }));
+  } catch {
+    // Ignore cache writes if storage is unavailable or full.
+  }
+};
+
 const parseJwt = (token) => {
   try {
     const base64Url = token.split('.')[1];
@@ -546,16 +581,17 @@ const App = () => {
   const [token, setToken] = useState(localStorage.getItem('adminToken') || '');
   const [googleEmail, setGoogleEmail] = useState(localStorage.getItem('googleEmail') || '');
   const [activeBatchKey, setActiveBatchKey] = useState(localStorage.getItem('activeBatchKey') || DEFAULT_BATCH_KEY);
+  const initialSnapshot = readBatchCache(activeBatchKey);
   const authHeaders = useAdminHeaders(token);
   const activeBatch = useMemo(() => getBatchConfig(activeBatchKey), [activeBatchKey]);
 
-  const [stats, setStats] = useState({});
-  const [companies, setCompanies] = useState([]);
-  const [students, setStudents] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState(initialSnapshot?.stats || {});
+  const [companies, setCompanies] = useState(initialSnapshot?.companies || []);
+  const [students, setStudents] = useState(initialSnapshot?.students || []);
+  const [loading, setLoading] = useState(!initialSnapshot);
   const [error, setError] = useState('');
   const [loginError, setLoginError] = useState('');
-  const isInitialLoad = useRef(true);
+  const isInitialLoad = useRef(!initialSnapshot);
   const isGoogleAuthed = !!googleEmail;
 
   const formatInr = (val, period = 'p.a.') => {
@@ -630,6 +666,23 @@ const App = () => {
 
   useEffect(() => {
     localStorage.setItem('activeBatchKey', activeBatch.key);
+    const cachedSnapshot = readBatchCache(activeBatch.key);
+
+    if (cachedSnapshot) {
+      setStats(cachedSnapshot.stats);
+      setCompanies(cachedSnapshot.companies);
+      setStudents(cachedSnapshot.students);
+      setLoading(false);
+      isInitialLoad.current = false;
+    } else {
+      setStats({});
+      setCompanies([]);
+      setStudents([]);
+      setLoading(true);
+      isInitialLoad.current = true;
+    }
+
+    setError('');
     setCompanyFilters({ type: '', category: '', branchGroup: '' });
     setStudentFilters({ branchGroup: '', programs: [], status: '', offerType: '' });
     setDashboardBranchFilter('ALL');
@@ -972,7 +1025,9 @@ const App = () => {
   };
 
   const refresh = async () => {
-    const initial = isInitialLoad.current;
+    const cachedSnapshot = readBatchCache(activeBatch.key);
+    const hasFallbackData = !!cachedSnapshot || companies.length > 0 || students.length > 0 || Object.keys(stats).length > 0;
+    const initial = isInitialLoad.current && !hasFallbackData;
     if (initial) setLoading(true);
 
     let retries = 0;
@@ -980,25 +1035,42 @@ const App = () => {
 
     const fetchData = async () => {
       try {
+        await api.get('/ping');
         const params = { params: { batch: activeBatch.key } };
         const [statsRes, companyRes, studentRes] = await Promise.all([
           api.get('/stats', params),
           api.get('/companies', params),
           api.get('/students', params),
         ]);
-        setStats(statsRes.data);
-        setCompanies(companyRes.data);
-        setStudents(studentRes.data);
+
+        const nextSnapshot = {
+          stats: statsRes.data,
+          companies: companyRes.data,
+          students: studentRes.data,
+        };
+
+        setStats(nextSnapshot.stats);
+        setCompanies(nextSnapshot.companies);
+        setStudents(nextSnapshot.students);
+        writeBatchCache(activeBatch.key, nextSnapshot);
         setError('');
-        if (initial) isInitialLoad.current = false;
+        isInitialLoad.current = false;
         if (initial) setLoading(false);
       } catch (err) {
         if (retries < maxRetries) {
           retries++;
-          setError(`Connecting to server... (Attempt ${retries}/${maxRetries}). Please wait while the free server wakes up.`);
+          setError(
+            hasFallbackData
+              ? `Showing saved data while the server wakes up. Refreshing latest data... (Attempt ${retries}/${maxRetries}).`
+              : `Connecting to server... (Attempt ${retries}/${maxRetries}). Please wait while the server wakes up.`
+          );
           setTimeout(fetchData, 5000);
         } else {
-          setError(`Network Error: ${err.message}. The server might be down or taking too long.`);
+          setError(
+            hasFallbackData
+              ? `Showing saved data. Latest refresh failed: ${err.message}`
+              : `Network Error: ${err.message}. The server might be down or taking too long.`
+          );
           if (initial) setLoading(false);
         }
       }
