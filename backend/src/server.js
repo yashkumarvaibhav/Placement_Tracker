@@ -33,11 +33,18 @@ app.use(cors({
 }));
 app.use(express.json());
 
+let isDbReady = false;
+
 const resolveBatchKey = (batchKey) => getBatchConfig(batchKey).key;
 const withResolvedBatch = (req) => ({
   ...req.body,
   batch_key: req.body?.batch_key || resolveBatchKey(req.query.batch),
 });
+
+const requireDbReady = (_req, res, next) => {
+  if (isDbReady) return next();
+  return res.status(503).json({ message: 'Server is warming up. Please retry shortly.' });
+};
 
 const authMiddleware = (req, res, next) => {
   const auth = req.headers.authorization || '';
@@ -58,6 +65,15 @@ app.post('/api/login', (req, res) => {
 app.get('/api/batches', (_req, res) => {
   res.json(BATCHES);
 });
+
+app.get('/api/ping', (_req, res) => {
+  res.status(isDbReady ? 200 : 503).json({ status: isDbReady ? 'ready' : 'warming' });
+});
+
+app.use('/api/companies', requireDbReady);
+app.use('/api/students', requireDbReady);
+app.use('/api/stats', requireDbReady);
+app.use('/api/health', requireDbReady);
 
 // Company routes
 app.get('/api/companies', async (req, res) => {
@@ -206,6 +222,7 @@ const start = async () => {
     try {
       await initDb();
       dbReady = true;
+      isDbReady = true;
       console.log('Database initialized successfully');
     } catch (err) {
       console.error('Failed to connect to DB, retrying in 10s...', err.message);
