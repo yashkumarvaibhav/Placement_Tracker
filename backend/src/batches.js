@@ -8,6 +8,12 @@ export const BATCHES = [
     graduation_year: 2027,
   },
   {
+    key: 'btech-2027',
+    label: 'B.Tech 2027',
+    degree: 'B.Tech',
+    graduation_year: 2027,
+  },
+  {
     key: 'mtech-2026',
     label: 'M.Tech 2026',
     degree: 'M.Tech',
@@ -20,10 +26,36 @@ export const BATCHES = [
     graduation_year: 2026,
   },
   {
-    key: 'btech-2027',
-    label: 'B.Tech 2027',
+    key: 'mtech-2025',
+    label: 'M.Tech 2025',
+    degree: 'M.Tech',
+    graduation_year: 2025,
+    placements_only: true,
+  },
+  {
+    key: 'btech-2025',
+    label: 'B.Tech 2025',
     degree: 'B.Tech',
-    graduation_year: 2027,
+    graduation_year: 2025,
+    placements_only: true,
+  },
+  {
+    key: 'mtech-cse-2024',
+    label: 'M.Tech CSE 2023-24',
+    degree: 'M.Tech',
+    graduation_year: 2024,
+    academic_year: '2023-24',
+    scope: 'CSE only',
+    aggregate_only: true,
+  },
+  {
+    key: 'mtech-cse-2023',
+    label: 'M.Tech CSE 2022-23',
+    degree: 'M.Tech',
+    graduation_year: 2023,
+    academic_year: '2022-23',
+    scope: 'CSE only',
+    aggregate_only: true,
   },
 ];
 
