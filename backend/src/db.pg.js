@@ -6,8 +6,12 @@ import {
   getBranchGroup,
   normalizeBatchPayload,
 } from './batches.js';
+import {
+  isCombinedOfferType,
+  isFullTimeOfferType,
+  isInternshipOfferType,
+} from './offer-types.js';
 
-const ADMIN_TOKEN = 'admin-static-token';
 
 // We will initialize this lazily to allow async DNS resolution
 let pool = null;
@@ -154,7 +158,7 @@ export const initDb = async () => {
       id BIGSERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       role TEXT,
-      type TEXT CHECK(type IN ('Intern','FTE','Intern+FTE')),
+      type TEXT CHECK(type IN ('Intern','FTE','Intern+FTE','Summer Intern + FTE','Summer Intern + PPO','Summer Intern','Intern + PPO')),
       ctc DOUBLE PRECISION,
       stipend DOUBLE PRECISION,
       category TEXT,
@@ -195,11 +199,21 @@ export const initDb = async () => {
       offer_date TEXT
     );`);
 
+  await query(`CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );`);
+
   await query('CREATE INDEX IF NOT EXISTS idx_offers_student_id ON offers(student_id);');
   await query('CREATE INDEX IF NOT EXISTS idx_offers_company_id ON offers(company_id);');
   await query('ALTER TABLE companies ADD COLUMN IF NOT EXISTS batch_key TEXT;');
   await query('ALTER TABLE companies ADD COLUMN IF NOT EXISTS degree TEXT;');
   await query('ALTER TABLE companies ADD COLUMN IF NOT EXISTS graduation_year INTEGER;');
+  await query('ALTER TABLE companies ADD COLUMN IF NOT EXISTS reported_offer_count INTEGER;');
+  await query('ALTER TABLE companies DROP CONSTRAINT IF EXISTS companies_type_check;');
+  await query(`ALTER TABLE companies ADD CONSTRAINT companies_type_check
+    CHECK(type IN ('Intern','FTE','Intern+FTE','Summer Intern + FTE','Summer Intern + PPO','Summer Intern','Intern + PPO'));`);
   await query('ALTER TABLE students ADD COLUMN IF NOT EXISTS batch_key TEXT;');
   await query('ALTER TABLE students ADD COLUMN IF NOT EXISTS degree TEXT;');
   await query('ALTER TABLE students ADD COLUMN IF NOT EXISTS graduation_year INTEGER;');
@@ -219,6 +233,32 @@ export const initDb = async () => {
   await query('CREATE INDEX IF NOT EXISTS idx_companies_batch_key ON companies(batch_key);');
   await query('CREATE INDEX IF NOT EXISTS idx_students_batch_key ON students(batch_key);');
   await query('CREATE UNIQUE INDEX IF NOT EXISTS idx_students_batch_roll_unique ON students(batch_key, roll_number);');
+};
+
+export const getAppSettings = async (keys) => {
+  const { rows } = await query(
+    'SELECT key, value FROM app_settings WHERE key = ANY($1::text[])',
+    [keys],
+  );
+  return Object.fromEntries(rows.map((row) => [row.key, row.value]));
+};
+
+export const setAppSettings = async (settings) => {
+  const entries = Object.entries(settings);
+  if (!entries.length) return;
+
+  const placeholders = entries
+    .map((_, index) => `($${index * 2 + 1}, $${index * 2 + 2}, NOW())`)
+    .join(', ');
+  const values = entries.flatMap(([key, value]) => [key, value]);
+
+  await query(
+    `INSERT INTO app_settings (key, value, updated_at)
+     VALUES ${placeholders}
+     ON CONFLICT (key) DO UPDATE
+     SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
+    values,
+  );
 };
 
 const backfillOffers = async () => {
@@ -457,6 +497,49 @@ export const buildStats = async (batchKey = DEFAULT_BATCH_KEY) => {
   const companies = await listCompanies(batch.key);
   const students = await listStudents(batch.key);
 
+  if (batch.aggregate_only) {
+    const totalOffers = companies.reduce((sum, company) => sum + (Number(company.reported_offer_count) || 0), 0);
+    const companiesWithOffers = companies.filter((company) => Number(company.reported_offer_count) > 0).length;
+    const aggregate = {
+      total_students: 0,
+      eligible_students: 0,
+      excluded_students: 0,
+      placed_students: 0,
+      unplaced_students: 0,
+      total_offers: totalOffers,
+      total_intern_offers: 0,
+      total_fte_offers: 0,
+      total_combo_offers: 0,
+      total_Aplus_offers: 0,
+      total_A_offers: 0,
+      total_B_offers: 0,
+      highest_ctc: null,
+      average_ctc: null,
+      median_ctc: null,
+      highest_stipend: null,
+      average_stipend: null,
+      median_stipend: null,
+      placement_percentage: 0,
+      internship_percentage: 0,
+      fte_percentage: 0,
+    };
+
+    return {
+      batch,
+      aggregate_only: true,
+      number_of_companies: companiesWithOffers,
+      total_companies_listed: companies.length,
+      total_offers: totalOffers,
+      total_students: 0,
+      eligible_students: 0,
+      excluded_students: 0,
+      unplaced_students: 0,
+      total_placed_students: 0,
+      available_programs: ['CSE'],
+      branch_summary: { overall: aggregate, cse: aggregate, ece: { ...aggregate, total_offers: 0 }, cb: { ...aggregate, total_offers: 0 } },
+    };
+  }
+
   const studentIds = students.map((student) => student.id);
   if (!studentIds.length) {
     const empty = {
@@ -553,9 +636,9 @@ export const buildStats = async (batchKey = DEFAULT_BATCH_KEY) => {
       ? offersWithProgram.filter((o) => offerProgramFilter(o.program))
       : offersWithProgram;
 
-    const internSub = offersSubset.filter((o) => (o.offer_type || '').includes('Intern') && o.offer_type !== 'Intern+FTE');
-    const fteSub = offersSubset.filter((o) => o.offer_type === 'FTE');
-    const comboSub = offersSubset.filter((o) => o.offer_type === 'Intern+FTE');
+    const comboSub = offersSubset.filter((o) => isCombinedOfferType(o.offer_type));
+    const internSub = offersSubset.filter((o) => isInternshipOfferType(o.offer_type) && !isCombinedOfferType(o.offer_type));
+    const fteSub = offersSubset.filter((o) => isFullTimeOfferType(o.offer_type) && !isCombinedOfferType(o.offer_type));
 
     const byCategory = { Aplus: 0, A: 0, B: 0 };
     for (const o of offersSubset) {
@@ -578,10 +661,10 @@ export const buildStats = async (batchKey = DEFAULT_BATCH_KEY) => {
 
     return {
       total_students: total,
-      eligible_students: placementEligibleTotal,
-      excluded_students: excludedStudents,
+      eligible_students: batch.placements_only ? null : placementEligibleTotal,
+      excluded_students: batch.placements_only ? null : excludedStudents,
       placed_students: placed,
-      unplaced_students: unplacedStudents,
+      unplaced_students: batch.placements_only ? null : unplacedStudents,
       total_offers: offersSubset.length,
       total_intern_offers: internSub.length,
       total_fte_offers: fteSub.length + comboSub.length,
@@ -595,7 +678,7 @@ export const buildStats = async (batchKey = DEFAULT_BATCH_KEY) => {
       highest_stipend: stipendValues.length ? Math.max(...stipendValues) : null,
       average_stipend: average(stipendValues),
       median_stipend: median(stipendValues),
-      placement_percentage: toPct(placed, placementEligibleTotal),
+      placement_percentage: batch.placements_only ? null : toPct(placed, placementEligibleTotal),
       internship_percentage: toPct(internCount, total),
       fte_percentage: toPct(fteCount, total),
     };
@@ -617,6 +700,11 @@ export const buildStats = async (batchKey = DEFAULT_BATCH_KEY) => {
   const unplacedCount = overall.unplaced_students;
   const fteCount = overall.total_fte_offers;
   const internCount = overall.total_intern_offers;
+  const historicalReportedOffers = companies.reduce(
+    (sum, company) => sum + (Number(company.reported_offer_count) || 0),
+    0
+  );
+  const historicalRecruiters = companies.filter((company) => Number(company.reported_offer_count) > 0).length;
 
   return {
     batch,
@@ -636,20 +724,21 @@ export const buildStats = async (batchKey = DEFAULT_BATCH_KEY) => {
     lowest_stipend: null,
     average_stipend: overall.average_stipend,
     median_stipend: overall.median_stipend,
-    fte_percentage: toPct(fteCount, totalStudents),
-    internship_percentage: toPct(internCount, totalStudents),
-    overall_placement_percentage: toPct(placedCount, placementEligibleStudents),
+    fte_percentage: overall.fte_percentage,
+    internship_percentage: overall.internship_percentage,
+    overall_placement_percentage: batch.placements_only ? null : toPct(placedCount, placementEligibleStudents),
     total_students: totalStudents,
-    eligible_students: placementEligibleStudents,
-    excluded_students: excludedStudents,
-    unplaced_students: unplacedCount,
+    eligible_students: batch.placements_only ? null : placementEligibleStudents,
+    excluded_students: batch.placements_only ? null : excludedStudents,
+    unplaced_students: batch.placements_only ? null : unplacedCount,
     total_placed_students: placedCount,
+    historical_reported_offers: historicalReportedOffers,
+    historical_recruiters: historicalRecruiters,
     available_programs: [...new Set(students.map((student) => student.program).filter(Boolean))].sort(),
     branch_summary: branchSummary,
   };
 };
 
-export const adminToken = ADMIN_TOKEN;
 export const closeDb = async () => {
   if (pool) await pool.end();
 };
