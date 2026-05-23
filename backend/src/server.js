@@ -1,33 +1,61 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import crypto from 'crypto';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import { OAuth2Client } from 'google-auth-library';
+import argon2 from 'argon2';
 import { BATCHES, getBatchConfig } from './batches.js';
 import {
-  adminToken,
   buildStats,
   createCompany,
   createStudent,
   deleteCompany,
   deleteStudent,
   ensureOfferBackfill,
+  getAppSettings,
   getTableCounts,
   getCompany,
   getStudent,
   initDb,
   listCompanies,
   listStudents,
+  setAppSettings,
   updateCompany,
   updateStudent,
 } from './db.js';
 
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'yash25091@iiitd.ac.in';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '***REMOVED***';
+const ADMIN_EMAIL = 'yash25091@iiitd.ac.in';
+const DEFAULT_VIEWER_USERNAME = process.env.VIEWER_USERNAME || 'guest@placement-atlas';
+const DEFAULT_VIEWER_PASSWORD = process.env.VIEWER_PASSWORD || '';
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '183667160330-4jtc41mg2jf7ugk6211smgcrr7lcfo02.apps.googleusercontent.com';
+const PLACEMENT_ATLAS_HOST = process.env.PLACEMENT_ATLAS_HOST || 'placement-atlas.yashkumarvaibhav.me';
+const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+const VIEWER_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const PORT = process.env.PORT || 4000;
+const frontendDistPath = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../frontend/dist',
+);
+const portfolioDistPath = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../../portfolio-site/dist',
+);
 
 const app = express();
+const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
+
+if (!process.env.SESSION_SECRET) {
+  console.warn('SESSION_SECRET is not set; viewer sessions will reset when the server restarts.');
+}
+
 app.use(cors({
-  origin: '*', // Allow all origins for simplicity (or specify your GitHub Pages URL)
+  origin: [
+    `https://${PLACEMENT_ATLAS_HOST}`,
+    'https://yashkumarvaibhav.me',
+    'http://localhost:5173',
+  ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
@@ -46,20 +74,205 @@ const requireDbReady = (_req, res, next) => {
   return res.status(503).json({ message: 'Server is warming up. Please retry shortly.' });
 };
 
-const authMiddleware = (req, res, next) => {
+const encodeSessionPart = (value) => Buffer.from(value).toString('base64url');
+
+const createSignedSession = (session) => {
+  const payload = encodeSessionPart(JSON.stringify(session));
+  const signature = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
+  return `${payload}.${signature}`;
+};
+
+const readSignedSession = (token) => {
+  const [payload, signature] = String(token || '').split('.');
+  if (!payload || !signature) return null;
+
+  const expected = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest();
+  const supplied = Buffer.from(signature, 'base64url');
+  if (expected.length !== supplied.length || !crypto.timingSafeEqual(expected, supplied)) return null;
+
+  try {
+    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+};
+
+const createViewerSession = () => createSignedSession({
+  type: 'viewer',
+  expires_at: Date.now() + VIEWER_SESSION_TTL_MS,
+});
+
+const createAdminSession = () => createSignedSession({
+  type: 'admin',
+  auth_source: 'google',
+  subject: 'primary-admin',
+});
+
+const isValidViewerSession = (token) => {
+  const session = readSignedSession(token);
+  return session?.type === 'viewer' && Number(session.expires_at) > Date.now();
+};
+
+const isValidAdminSession = (token) => {
+  const session = readSignedSession(token);
+  return session?.type === 'admin'
+    && session.auth_source === 'google'
+    && session.subject === 'primary-admin';
+};
+
+const safeEqual = (left, right) => {
+  const leftBuffer = Buffer.from(String(left));
+  const rightBuffer = Buffer.from(String(right));
+  return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
+};
+
+const hashPassword = (password) => argon2.hash(password, {
+  type: argon2.argon2id,
+  memoryCost: 65536,
+  timeCost: 3,
+  parallelism: 1,
+});
+
+const verifyLegacyScryptPassword = (password, storedHash) => {
+  const [algorithm, salt, expectedHash] = String(storedHash || '').split('$');
+  if (algorithm !== 'scrypt' || !salt || !expectedHash) return false;
+
+  const actual = crypto.scryptSync(password, salt, 64);
+  const expected = Buffer.from(expectedHash, 'base64url');
+  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+};
+
+const verifyPassword = async (password, storedHash) => {
+  if (String(storedHash).startsWith('$argon2id$')) {
+    return argon2.verify(storedHash, password);
+  }
+  return verifyLegacyScryptPassword(password, storedHash);
+};
+
+const getViewerCredentials = async () => {
+  const settings = await getAppSettings(['viewer_username', 'viewer_password_hash']);
+  return {
+    username: settings.viewer_username || DEFAULT_VIEWER_USERNAME,
+    passwordHash: settings.viewer_password_hash || '',
+  };
+};
+
+const ensureDefaultViewerCredentials = async () => {
+  const settings = await getAppSettings(['viewer_username', 'viewer_password_hash']);
+  const defaults = {};
+
+  if (!settings.viewer_username) defaults.viewer_username = DEFAULT_VIEWER_USERNAME;
+  if (!settings.viewer_password_hash && DEFAULT_VIEWER_PASSWORD) {
+    defaults.viewer_password_hash = await hashPassword(DEFAULT_VIEWER_PASSWORD);
+  }
+
+  await setAppSettings(defaults);
+};
+
+const bearerToken = (req) => {
   const auth = req.headers.authorization || '';
-  if (!auth.startsWith('Bearer ')) return res.status(401).json({ message: 'Unauthorized' });
-  const token = auth.replace('Bearer ', '').trim();
-  if (token !== adminToken) return res.status(401).json({ message: 'Unauthorized' });
+  return auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+};
+
+const requireViewerAuth = (req, res, next) => {
+  const token = bearerToken(req);
+  if (isValidAdminSession(token) || isValidViewerSession(token)) return next();
+  return res.status(401).json({ message: 'A verified IIIT Delhi sign-in is required.' });
+};
+
+const authMiddleware = (req, res, next) => {
+  const token = bearerToken(req);
+  if (!isValidAdminSession(token)) return res.status(401).json({ message: 'Unauthorized' });
   return next();
 };
 
-app.post('/api/login', (req, res) => {
-  const { email, password } = req.body || {};
-  if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
-    return res.json({ token: adminToken, email });
+app.post('/api/auth/google', async (req, res) => {
+  try {
+    const credential = req.body?.credential;
+    if (!credential) return res.status(400).json({ message: 'Google credential is required.' });
+
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+    const email = payload?.email?.toLowerCase();
+    const isIIITDAccount = payload?.email_verified
+      && payload?.hd === 'iiitd.ac.in'
+      && email?.endsWith('@iiitd.ac.in');
+
+    if (!isIIITDAccount) {
+      return res.status(403).json({ message: 'Please use a verified IIIT Delhi Google account.' });
+    }
+
+    const isAdmin = email === ADMIN_EMAIL;
+    return res.json({
+      token: isAdmin ? createAdminSession() : createViewerSession(),
+      is_admin: isAdmin,
+      expires_in: isAdmin ? null : VIEWER_SESSION_TTL_MS / 1000,
+    });
+  } catch {
+    return res.status(401).json({ message: 'Google sign-in could not be verified.' });
   }
-  return res.status(401).json({ message: 'Invalid credentials' });
+});
+
+app.post('/api/auth/viewer', requireDbReady, async (req, res) => {
+  try {
+    const username = String(req.body?.username || '').trim().toLowerCase();
+    const password = String(req.body?.password || '');
+    const credentials = await getViewerCredentials();
+    const usernameValid = safeEqual(username, credentials.username.trim().toLowerCase());
+    const passwordValid = credentials.passwordHash
+      ? await verifyPassword(password, credentials.passwordHash)
+      : false;
+
+    if (!usernameValid || !passwordValid) {
+      return res.status(401).json({ message: 'Incorrect viewer username or password.' });
+    }
+
+    return res.json({ token: createViewerSession(), expires_in: VIEWER_SESSION_TTL_MS / 1000 });
+  } catch {
+    return res.status(500).json({ message: 'Viewer sign-in could not be completed.' });
+  }
+});
+
+app.get('/api/auth/session', requireViewerAuth, (req, res) => {
+  res.json({
+    valid: true,
+    is_admin: isValidAdminSession(bearerToken(req)),
+  });
+});
+
+app.get('/api/admin/session', authMiddleware, (_req, res) => {
+  res.json({ valid: true });
+});
+
+app.get('/api/admin/viewer-access', authMiddleware, requireDbReady, async (_req, res) => {
+  try {
+    const credentials = await getViewerCredentials();
+    return res.json({ username: credentials.username });
+  } catch {
+    return res.status(500).json({ message: 'Viewer access settings could not be loaded.' });
+  }
+});
+
+app.put('/api/admin/viewer-access', authMiddleware, requireDbReady, async (req, res) => {
+  const username = String(req.body?.username || '').trim().toLowerCase();
+  const password = String(req.body?.password || '');
+
+  if (!username || password.length < 12) {
+    return res.status(400).json({ message: 'Enter a username and a password of at least 12 characters.' });
+  }
+
+  try {
+    await setAppSettings({
+      viewer_username: username,
+      viewer_password_hash: await hashPassword(password),
+    });
+    return res.json({ username });
+  } catch {
+    return res.status(500).json({ message: 'Viewer access settings could not be updated.' });
+  }
 });
 
 app.get('/api/batches', (_req, res) => {
@@ -69,6 +282,11 @@ app.get('/api/batches', (_req, res) => {
 app.get('/api/ping', (_req, res) => {
   res.status(isDbReady ? 200 : 503).json({ status: isDbReady ? 'ready' : 'warming' });
 });
+
+app.use('/api/companies', requireViewerAuth);
+app.use('/api/students', requireViewerAuth);
+app.use('/api/stats', requireViewerAuth);
+app.use('/api/health', requireViewerAuth);
 
 app.use('/api/companies', requireDbReady);
 app.use('/api/students', requireDbReady);
@@ -208,8 +426,27 @@ app.get('/api/health', async (_req, res) => {
   }
 });
 
-app.get('/', (_req, res) => {
-  res.json({ status: 'Placement Tracker API', version: '1.0.0' });
+app.use('/api', (_req, res) => {
+  res.status(404).json({ message: 'API route not found.' });
+});
+
+app.use('/Placement_Tracker', (req, res) => {
+  const suffix = req.originalUrl.replace(/^\/Placement_Tracker\/?/, '/');
+  res.redirect(308, `https://${PLACEMENT_ATLAS_HOST}${suffix}`);
+});
+
+app.use((req, res, next) => {
+  if (req.hostname !== PLACEMENT_ATLAS_HOST) return next();
+
+  return express.static(frontendDistPath)(req, res, (err) => {
+    if (err) return next(err);
+    return res.sendFile(path.join(frontendDistPath, 'index.html'));
+  });
+});
+
+app.use(express.static(portfolioDistPath));
+app.get('*', (_req, res) => {
+  res.sendFile(path.join(portfolioDistPath, 'index.html'));
 });
 
 const start = async () => {
@@ -221,6 +458,7 @@ const start = async () => {
   while (!dbReady) {
     try {
       await initDb();
+      await ensureDefaultViewerCredentials();
       dbReady = true;
       isDbReady = true;
       console.log('Database initialized successfully');
