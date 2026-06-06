@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
-import { Link, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { GoogleLogin } from '@react-oauth/google';
+import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { GoogleLogin, googleLogout } from '@react-oauth/google';
 import {
   BATCHES,
   DEFAULT_BATCH_KEY,
@@ -10,9 +10,43 @@ import {
   getBatchConfig,
   getBranchGroup,
 } from './batches';
+import {
+  OFFER_TYPES,
+  isCombinedOfferType,
+  isFullTimeOfferType,
+  isInternshipOfferType,
+} from './offerTypes';
+import { OFFICIAL_2025 } from './official2025';
+import { OFFICIAL_2026 } from './official2026';
 
 const api = axios.create({ baseURL: import.meta.env.VITE_API_BASE || '/api' });
 const assetBase = import.meta.env.BASE_URL || '/';
+const VIEWER_TOKEN_STORAGE_KEY = 'viewerToken';
+const readInitialBatchKey = () => {
+  const stored = localStorage.getItem('activeBatchKey');
+  return stored === 'mtech-cse-2025' ? 'mtech-2025' : stored || DEFAULT_BATCH_KEY;
+};
+
+const readStoredViewerToken = () => {
+  const storedToken = localStorage.getItem(VIEWER_TOKEN_STORAGE_KEY);
+  if (storedToken) return storedToken;
+
+  const legacyToken = sessionStorage.getItem(VIEWER_TOKEN_STORAGE_KEY);
+  if (legacyToken) {
+    localStorage.setItem(VIEWER_TOKEN_STORAGE_KEY, legacyToken);
+    sessionStorage.removeItem(VIEWER_TOKEN_STORAGE_KEY);
+  }
+
+  return legacyToken || '';
+};
+
+const storeViewerToken = (token) => {
+  if (token) {
+    localStorage.setItem(VIEWER_TOKEN_STORAGE_KEY, token);
+  } else {
+    localStorage.removeItem(VIEWER_TOKEN_STORAGE_KEY);
+  }
+};
 
 const getBatchCacheKey = (batchKey) => `placementSnapshot:${batchKey}`;
 
@@ -20,7 +54,7 @@ const readBatchCache = (batchKey) => {
   if (typeof window === 'undefined') return null;
 
   try {
-    const raw = window.localStorage.getItem(getBatchCacheKey(batchKey));
+    const raw = window.sessionStorage.getItem(getBatchCacheKey(batchKey));
     if (!raw) return null;
 
     const parsed = JSON.parse(raw);
@@ -40,23 +74,12 @@ const writeBatchCache = (batchKey, snapshot) => {
   if (typeof window === 'undefined') return;
 
   try {
-    window.localStorage.setItem(getBatchCacheKey(batchKey), JSON.stringify({
+    window.sessionStorage.setItem(getBatchCacheKey(batchKey), JSON.stringify({
       ...snapshot,
       cachedAt: new Date().toISOString(),
     }));
   } catch {
     // Ignore cache writes if storage is unavailable or full.
-  }
-};
-
-const parseJwt = (token) => {
-  try {
-    const base64Url = token.split('.')[1];
-    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-    const jsonPayload = decodeURIComponent(atob(base64).split('').map((c) => `%${(`00${c.charCodeAt(0).toString(16)}`).slice(-2)}`).join(''));
-    return JSON.parse(jsonPayload);
-  } catch (err) {
-    return null;
   }
 };
 
@@ -95,6 +118,125 @@ const MetricLabel = ({ metricKey, children }) => (
   <span className="metric-label-inline">
     <span>{children}</span>
     <InfoTip text={METRIC_DEFINITIONS[metricKey]} />
+  </span>
+);
+
+const MobileDisclosure = ({ summary, className = '', contentClassName = '', children }) => {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className={`mobile-disclosure ${open ? 'is-open' : ''} ${className}`.trim()}>
+      <button
+        type="button"
+        className="mobile-disclosure-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span>{summary}</span>
+        <span className="disclosure-icon" aria-hidden="true">+</span>
+      </button>
+      <div className={`mobile-disclosure-content ${contentClassName}`.trim()}>{children}</div>
+    </div>
+  );
+};
+
+const initialsFor = (value = '') => value
+  .split(/\s+/)
+  .filter(Boolean)
+  .slice(0, 2)
+  .map((word) => word[0]?.toUpperCase())
+  .join('') || 'II';
+
+const DonutChart = ({ value = 0, total = 0, label, detail, tone = 'accent' }) => {
+  const safeTotal = Math.max(Number(total) || 0, 0);
+  const safeValue = Math.min(Math.max(Number(value) || 0, 0), safeTotal || Number(value) || 0);
+  const percentage = safeTotal ? Math.round((safeValue / safeTotal) * 100) : 0;
+  const radius = 52;
+  const circumference = 2 * Math.PI * radius;
+  const dash = (percentage / 100) * circumference;
+
+  return (
+    <div className={`donut-chart donut-chart-${tone}`}>
+      <svg viewBox="0 0 132 132" role="img" aria-label={`${label}: ${percentage}%`}>
+        <circle className="donut-track" cx="66" cy="66" r={radius} />
+        <circle
+          className="donut-value"
+          cx="66"
+          cy="66"
+          r={radius}
+          strokeDasharray={`${dash} ${circumference - dash}`}
+        />
+      </svg>
+      <div className="donut-center">
+        <strong>{percentage}%</strong>
+        <span>{detail}</span>
+      </div>
+      <div className="donut-caption">{label}</div>
+    </div>
+  );
+};
+
+const SegmentedBar = ({ items, label }) => {
+  const total = items.reduce((sum, item) => sum + (Number(item.value) || 0), 0);
+  return (
+    <div className="segmented-chart">
+      <div className="segmented-chart-head">
+        <span>{label}</span>
+        <strong>{total}</strong>
+      </div>
+      <div className="segmented-bar" role="img" aria-label={`${label}: ${items.map((item) => `${item.label} ${item.value}`).join(', ')}`}>
+        {items.map((item) => (
+          <span
+            key={item.label}
+            className={`segment segment-${item.tone || 'accent'}`}
+            style={{ width: `${total ? ((Number(item.value) || 0) / total) * 100 : 0}%` }}
+          />
+        ))}
+      </div>
+      <div className="chart-legend">
+        {items.map((item) => (
+          <div key={item.label} className="legend-item">
+            <span className={`legend-dot legend-${item.tone || 'accent'}`} />
+            <span>{item.label}</span>
+            <strong>{item.value}</strong>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const HorizontalBars = ({ items, valueFormatter = (value) => value }) => {
+  const maximum = Math.max(...items.map((item) => Number(item.value) || 0), 1);
+  return (
+    <div className="horizontal-bars">
+      {items.map((item) => (
+        <div key={item.label} className="horizontal-bar-row">
+          <div className="horizontal-bar-label">
+            <span>{item.label}</span>
+            <strong>{valueFormatter(item.value)}</strong>
+          </div>
+          <div className="horizontal-bar-track">
+            <span style={{ width: `${((Number(item.value) || 0) / maximum) * 100}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const MetricTile = ({ label, value, note, metricKey }) => (
+  <div className="metric-tile">
+    <div className="metric-tile-label"><MetricLabel metricKey={metricKey}>{label}</MetricLabel></div>
+    <div className="metric-tile-value">{value}</div>
+    {note && <div className="metric-tile-note">{note}</div>}
+  </div>
+);
+
+const StatusPill = ({ status }) => (
+  <span className={`status-pill status-${String(status || 'unknown').toLowerCase().replace(/\s+/g, '-')}`}>
+    <span className="status-dot" />
+    {status || 'Unknown'}
   </span>
 );
 
@@ -157,7 +299,7 @@ const getStudentOffers = (student) => {
   }];
 };
 
-const buildProgramSummaries = (students) => {
+const buildProgramSummaries = (students, placementsOnly = false) => {
   if (!students.length) {
     return { branchGroups: [], branchSummaries: { ALL: EMPTY_SLICE_SUMMARY }, programSummaries: [] };
   }
@@ -183,9 +325,9 @@ const buildProgramSummaries = (students) => {
     const excludedStudents = Math.max(total - placementEligibleTotal, 0);
     const unplacedStudents = Math.max(placementEligibleTotal - placed, 0);
     const offersSubset = offersWithProgram.filter((offer) => offerProgramFilter(offer.program));
-    const internOffers = offersSubset.filter((offer) => (offer.offer_type || '').includes('Intern') && offer.offer_type !== 'Intern+FTE');
-    const fteOffers = offersSubset.filter((offer) => offer.offer_type === 'FTE');
-    const comboOffers = offersSubset.filter((offer) => offer.offer_type === 'Intern+FTE');
+    const comboOffers = offersSubset.filter((offer) => isCombinedOfferType(offer.offer_type));
+    const internOffers = offersSubset.filter((offer) => isInternshipOfferType(offer.offer_type) && !isCombinedOfferType(offer.offer_type));
+    const fteOffers = offersSubset.filter((offer) => isFullTimeOfferType(offer.offer_type) && !isCombinedOfferType(offer.offer_type));
 
     const categories = { Aplus: 0, A: 0, B: 0 };
     offersSubset.forEach((offer) => {
@@ -207,10 +349,10 @@ const buildProgramSummaries = (students) => {
 
     return {
       total_students: total,
-      eligible_students: placementEligibleTotal,
-      excluded_students: excludedStudents,
+      eligible_students: placementsOnly ? null : placementEligibleTotal,
+      excluded_students: placementsOnly ? null : excludedStudents,
       placed_students: placed,
-      unplaced_students: unplacedStudents,
+      unplaced_students: placementsOnly ? null : unplacedStudents,
       total_offers: offersSubset.length,
       total_intern_offers: internOffers.length,
       total_fte_offers: fteCount,
@@ -224,7 +366,7 @@ const buildProgramSummaries = (students) => {
       highest_stipend: stipendValues.length ? Math.max(...stipendValues) : null,
       average_stipend: average(stipendValues),
       median_stipend: median(stipendValues),
-      placement_percentage: toPct(placed, placementEligibleTotal),
+      placement_percentage: placementsOnly ? null : toPct(placed, placementEligibleTotal),
       internship_percentage: toPct(internshipCount, total),
       fte_percentage: toPct(fteCount, total),
     };
@@ -310,9 +452,7 @@ const CompanyForm = ({ initial = {}, onSubmit, onCancel }) => {
         <div>
           <label>Type</label>
           <select name="type" value={form.type} onChange={handleChange}>
-            <option>Intern</option>
-            <option>FTE</option>
-            <option>Intern+FTE</option>
+            {OFFER_TYPES.map((type) => <option key={type}>{type}</option>)}
           </select>
         </div>
         <div>
@@ -532,9 +672,7 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
                     <label>Offer Type</label>
                     <select value={offer.offer_type || ''} onChange={(e) => updateOfferField(idx, 'offer_type', e.target.value)}>
                       <option value="">Select</option>
-                      <option>Intern</option>
-                      <option>FTE</option>
-                      <option>Intern+FTE</option>
+                      {OFFER_TYPES.map((type) => <option key={type}>{type}</option>)}
                     </select>
                   </div>
                   <div>
@@ -576,14 +714,33 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
 const useAdminHeaders = (token) => useMemo(() => ({ headers: { Authorization: `Bearer ${token}` } }), [token]);
 
 const App = () => {
-  const navigate = useNavigate();
   const location = useLocation();
-  const [token, setToken] = useState(localStorage.getItem('adminToken') || '');
-  const [googleEmail, setGoogleEmail] = useState(localStorage.getItem('googleEmail') || '');
-  const [activeBatchKey, setActiveBatchKey] = useState(localStorage.getItem('activeBatchKey') || DEFAULT_BATCH_KEY);
+  const [viewerToken, setViewerToken] = useState(readStoredViewerToken);
+  const [token, setToken] = useState('');
+  const [activeBatchKey, setActiveBatchKey] = useState(readInitialBatchKey);
   const initialSnapshot = readBatchCache(activeBatchKey);
   const authHeaders = useAdminHeaders(token);
+  const viewerHeaders = useAdminHeaders(viewerToken);
+  const isAdmin = !!token;
   const activeBatch = useMemo(() => getBatchConfig(activeBatchKey), [activeBatchKey]);
+  const isAggregateOnly = !!activeBatch.aggregate_only;
+  const isPlacementRecordsOnly = !!activeBatch.placements_only;
+  const isOfficial2025 = activeBatch.graduation_year === 2025 && isPlacementRecordsOnly;
+  const isOfficial2026 = activeBatch.graduation_year === 2026 && !isAggregateOnly;
+  const official2025Programs = OFFICIAL_2025.programs[activeBatch.degree] || [];
+  const official2025AverageLpa = activeBatch.degree === 'B.Tech'
+    ? OFFICIAL_2025.average_btech_lpa
+    : OFFICIAL_2025.average_mtech_lpa;
+  const official2025HighestIndianLpa = activeBatch.degree === 'B.Tech'
+    ? OFFICIAL_2025.highest_indian_btech_lpa
+    : OFFICIAL_2025.highest_indian_mtech_lpa;
+  const official2026Programs = OFFICIAL_2026.programs[activeBatch.degree] || [];
+  const official2026AverageLpa = activeBatch.degree === 'B.Tech'
+    ? OFFICIAL_2026.average_btech_lpa
+    : OFFICIAL_2026.average_mtech_lpa;
+  const official2026HighestIndianLpa = activeBatch.degree === 'B.Tech'
+    ? OFFICIAL_2026.highest_indian_btech_lpa
+    : OFFICIAL_2026.highest_indian_mtech_lpa;
 
   const [stats, setStats] = useState(initialSnapshot?.stats || {});
   const [companies, setCompanies] = useState(initialSnapshot?.companies || []);
@@ -591,8 +748,9 @@ const App = () => {
   const [loading, setLoading] = useState(!initialSnapshot);
   const [error, setError] = useState('');
   const [loginError, setLoginError] = useState('');
-  const isInitialLoad = useRef(!initialSnapshot);
-  const isGoogleAuthed = !!googleEmail;
+  const [authPending, setAuthPending] = useState(false);
+  const refreshRequestId = useRef(0);
+  const isViewerAuthed = !!viewerToken;
 
   const formatInr = (val, period = 'p.a.') => {
     if (val === null || val === undefined || Number.isNaN(Number(val))) return '—';
@@ -619,29 +777,57 @@ const App = () => {
     return `${day}${suffix(day)} ${month}, ${year}`;
   };
 
-  const handleGoogleSuccess = (credentialResponse) => {
-    const tokenId = credentialResponse?.credential;
-    const payload = tokenId ? parseJwt(tokenId) : null;
-    const email = payload?.email;
-    if (!email || !email.toLowerCase().endsWith('@iiitd.ac.in')) {
-      setLoginError('Only iiitd.ac.in email accounts are allowed.');
-      return;
-    }
+  const handleGoogleSuccess = async (credentialResponse) => {
+    setAuthPending(true);
     setLoginError('');
-    setGoogleEmail(email);
-    localStorage.setItem('googleEmail', email);
-    refresh();
+
+    try {
+      const response = await api.post('/auth/google', { credential: credentialResponse?.credential });
+      setViewerToken(response.data.token);
+      storeViewerToken(response.data.token);
+      if (response.data.is_admin) {
+        setToken(response.data.token);
+      } else {
+        setToken('');
+      }
+    } catch (err) {
+      googleLogout();
+      setLoginError(err.response?.data?.message || 'Google sign-in could not be verified.');
+    } finally {
+      setAuthPending(false);
+    }
   };
 
   const handleGoogleError = () => {
+    googleLogout();
     setLoginError('Google sign-in failed. Please try again.');
   };
 
+  const handleViewerLogin = async ({ username, password }) => {
+    setAuthPending(true);
+    setLoginError('');
+
+    try {
+      const response = await api.post('/auth/viewer', { username, password });
+      setViewerToken(response.data.token);
+      storeViewerToken(response.data.token);
+      setToken('');
+    } catch (err) {
+      setLoginError(err.response?.data?.message || 'Viewer sign-in could not be completed.');
+    } finally {
+      setAuthPending(false);
+    }
+  };
+
   const handleGoogleLogout = () => {
-    setGoogleEmail('');
-    localStorage.removeItem('googleEmail');
+    googleLogout();
+    setViewerToken('');
+    storeViewerToken('');
+    BATCHES.forEach((batch) => sessionStorage.removeItem(getBatchCacheKey(batch.key)));
     setToken('');
-    localStorage.removeItem('adminToken');
+    setStats({});
+    setCompanies([]);
+    setStudents([]);
   };
 
   const [showCompanyModal, setShowCompanyModal] = useState(false);
@@ -659,6 +845,7 @@ const App = () => {
   const [studentSearch, setStudentSearch] = useState('');
   const [studentSort, setStudentSort] = useState({ field: 'roll_number', asc: true });
   const [studentFilters, setStudentFilters] = useState({ branchGroup: '', programs: [], status: '', offerType: '' });
+  const [selectedStudent, setSelectedStudent] = useState(null);
   const [dashboardBranchFilter, setDashboardBranchFilter] = useState('ALL');
   const [mobileHeaderHidden, setMobileHeaderHidden] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -673,13 +860,11 @@ const App = () => {
       setCompanies(cachedSnapshot.companies);
       setStudents(cachedSnapshot.students);
       setLoading(false);
-      isInitialLoad.current = false;
     } else {
       setStats({});
       setCompanies([]);
       setStudents([]);
       setLoading(true);
-      isInitialLoad.current = true;
     }
 
     setError('');
@@ -689,8 +874,50 @@ const App = () => {
     setCompanySearch('');
     setStudentSearch('');
     setSelectedCompany(null);
+    setSelectedStudent(null);
     setMobileNavOpen(false);
   }, [activeBatch.key]);
+
+  useEffect(() => {
+    if (!viewerToken) {
+      setToken('');
+      return;
+    }
+
+    let active = true;
+    api.get('/auth/session', viewerHeaders)
+      .then((response) => {
+        if (!active) return;
+        setToken(response.data.is_admin ? viewerToken : '');
+      })
+      .catch(() => {
+        if (!active) return;
+        handleGoogleLogout();
+        setLoginError('Your viewer session expired. Please sign in again.');
+      });
+
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewerHeaders, viewerToken]);
+
+  useEffect(() => {
+    const handleStorageChange = (event) => {
+      if (event.key !== VIEWER_TOKEN_STORAGE_KEY) return;
+
+      const nextToken = event.newValue || '';
+      setViewerToken(nextToken);
+      if (!nextToken) {
+        setToken('');
+        BATCHES.forEach((batch) => sessionStorage.removeItem(getBatchCacheKey(batch.key)));
+        setStats({});
+        setCompanies([]);
+        setStudents([]);
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
 
   useEffect(() => {
     setMobileNavOpen(false);
@@ -703,7 +930,7 @@ const App = () => {
   }, [themeMode]);
 
   useEffect(() => {
-    if (!isGoogleAuthed || typeof window === 'undefined') {
+    if (!isViewerAuthed || typeof window === 'undefined') {
       setMobileHeaderHidden(false);
       return undefined;
     }
@@ -760,7 +987,7 @@ const App = () => {
         mobileMedia.removeListener(handleViewportChange);
       }
     };
-  }, [isGoogleAuthed, mobileNavOpen]);
+  }, [isViewerAuthed, mobileNavOpen]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
@@ -806,13 +1033,13 @@ const App = () => {
   );
 
   const { branchGroups: dashboardBranchGroups, branchSummaries: dashboardBranchSummaries, programSummaries } = useMemo(
-    () => buildProgramSummaries(students),
-    [students]
+    () => buildProgramSummaries(students, isPlacementRecordsOnly),
+    [isPlacementRecordsOnly, students]
   );
 
   const dashboardBranchFilters = useMemo(
-    () => ['ALL', ...dashboardBranchGroups],
-    [dashboardBranchGroups]
+    () => (isAggregateOnly ? ['ALL'] : ['ALL', ...dashboardBranchGroups]),
+    [dashboardBranchGroups, isAggregateOnly]
   );
 
   const filteredProgramSummaries = useMemo(
@@ -821,8 +1048,10 @@ const App = () => {
   );
 
   const activeOverviewSummary = useMemo(
-    () => dashboardBranchSummaries[dashboardBranchFilter] || EMPTY_SLICE_SUMMARY,
-    [dashboardBranchFilter, dashboardBranchSummaries]
+    () => (isAggregateOnly
+      ? stats.branch_summary?.overall || EMPTY_SLICE_SUMMARY
+      : dashboardBranchSummaries[dashboardBranchFilter] || EMPTY_SLICE_SUMMARY),
+    [dashboardBranchFilter, dashboardBranchSummaries, isAggregateOnly, stats.branch_summary]
   );
 
   const toggleProgramFilter = (program) => {
@@ -836,7 +1065,11 @@ const App = () => {
 
   // Compute hiring stats per company from students data
   const companyHiringStats = useMemo(() => {
-    const stats = {};
+    const stats = companies.reduce((accumulator, company) => {
+      const reportedOffers = Number(company.reported_offer_count) || 0;
+      accumulator[company.id] = { total: 0, reported: reportedOffers, CSE: 0, ECE: 0, CB: 0, OTHER: 0, students: [] };
+      return accumulator;
+    }, {});
     students.forEach((s) => {
       (s.offers || []).forEach((o) => {
         const cid = o.company_id;
@@ -850,11 +1083,17 @@ const App = () => {
       });
     });
     return stats;
-  }, [students]);
+  }, [companies, students]);
 
   // Filtered and sorted companies
   const filteredCompanies = useMemo(() => {
     let result = [...companies];
+    if (!isAdmin) {
+      result = result.filter((company) => {
+        const hiring = companyHiringStats[company.id];
+        return (hiring?.total || 0) > 0 || (hiring?.reported || 0) > 0;
+      });
+    }
     // Search
     if (companySearch.trim()) {
       const q = companySearch.toLowerCase();
@@ -876,8 +1115,8 @@ const App = () => {
     result.sort((a, b) => {
       let av, bv;
       if (field === 'totalHired') {
-        av = companyHiringStats[a.id]?.total || 0;
-        bv = companyHiringStats[b.id]?.total || 0;
+        av = companyHiringStats[a.id]?.total || companyHiringStats[a.id]?.reported || 0;
+        bv = companyHiringStats[b.id]?.total || companyHiringStats[b.id]?.reported || 0;
       } else if (field === 'cseHired') {
         av = companyHiringStats[a.id]?.CSE || 0;
         bv = companyHiringStats[b.id]?.CSE || 0;
@@ -902,7 +1141,7 @@ const App = () => {
       return 0;
     });
     return result;
-  }, [companies, companySearch, companyFilters, companySort, companyHiringStats]);
+  }, [companies, companySearch, companyFilters, companySort, companyHiringStats, isAdmin]);
 
   // Filtered and sorted students
   const filteredStudents = useMemo(() => {
@@ -935,6 +1174,12 @@ const App = () => {
     // Sort
     const { field, asc } = studentSort;
     result.sort((a, b) => {
+      const participationRank = (student) => (
+        ['Not Sitting', 'Ineligible'].includes(student.placement_status) ? 1 : 0
+      );
+      const rankDifference = participationRank(a) - participationRank(b);
+      if (rankDifference !== 0) return rankDifference;
+
       let av, bv;
       if (field === 'ctc' || field === 'stipend') {
         // Use max from offers or direct value
@@ -972,10 +1217,11 @@ const App = () => {
     const totals = filteredCompanies.reduce((summary, company) => {
       const type = company.type || 'OTHER';
       const category = (company.category || '').toUpperCase();
-      summary.hires += companyHiringStats[company.id]?.total || 0;
-      if (type === 'Intern') summary.intern += 1;
-      if (type === 'FTE') summary.fte += 1;
-      if (type === 'Intern+FTE') summary.combo += 1;
+      const hiring = companyHiringStats[company.id];
+      summary.hires += isAggregateOnly ? hiring?.reported || 0 : hiring?.total || 0;
+      if (isInternshipOfferType(type)) summary.intern += 1;
+      if (isFullTimeOfferType(type)) summary.fte += 1;
+      if (isCombinedOfferType(type)) summary.combo += 1;
       if (category === 'A+') summary.aplus += 1;
       return summary;
     }, { hires: 0, intern: 0, fte: 0, combo: 0, aplus: 0 });
@@ -983,10 +1229,10 @@ const App = () => {
     return {
       total: filteredCompanies.length,
       trackedHires: totals.hires,
-      activeTypes: [totals.fte ? 'FTE' : null, totals.intern ? 'Intern' : null, totals.combo ? 'Hybrid' : null].filter(Boolean).join(' · ') || 'All company types',
+      activeTypes: isAggregateOnly ? 'M.Tech CSE aggregate' : [totals.fte ? 'FTE' : null, totals.intern ? 'Intern' : null, totals.combo ? 'Hybrid' : null].filter(Boolean).join(' · ') || 'All company types',
       spotlight: totals.aplus,
     };
-  }, [filteredCompanies, companyHiringStats]);
+  }, [filteredCompanies, companyHiringStats, isAggregateOnly]);
 
   const studentOverview = useMemo(() => {
     const placed = filteredStudents.filter((student) => student.placement_status === 'Placed').length;
@@ -994,9 +1240,9 @@ const App = () => {
     const excluded = Math.max(filteredStudents.length - eligible, 0);
     const internships = filteredStudents.filter((student) => {
       if (student.offers?.length) {
-        return student.offers.some((offer) => offer.offer_type === 'Intern' || offer.offer_type === 'Intern+FTE');
+        return student.offers.some((offer) => isInternshipOfferType(offer.offer_type));
       }
-      return student.offer_type === 'Intern' || student.offer_type === 'Intern+FTE';
+      return isInternshipOfferType(student.offer_type);
     }).length;
 
     return {
@@ -1009,6 +1255,69 @@ const App = () => {
       programs: new Set(filteredStudents.map((student) => student.program).filter(Boolean)).size,
     };
   }, [filteredStudents]);
+
+  const dashboardVisuals = useMemo(() => {
+    const cohortStudents = students.filter((student) => (
+      dashboardBranchFilter === 'ALL'
+      || getBranchGroup(student.program) === dashboardBranchFilter
+    ));
+    const cohortOffers = cohortStudents.flatMap(getStudentOffers);
+    const ctcValues = cohortOffers
+      .map((offer) => Number(offer.ctc ?? offer.company_ctc))
+      .filter((value) => Number.isFinite(value) && value > 0);
+    const compensationBands = [
+      { label: '< 10 LPA', min: 0, max: 1000000 },
+      { label: '10–15 LPA', min: 1000000, max: 1500000 },
+      { label: '15–20 LPA', min: 1500000, max: 2000000 },
+      { label: '20–30 LPA', min: 2000000, max: 3000000 },
+      { label: '30+ LPA', min: 3000000, max: Infinity },
+    ].map((band) => ({
+      label: band.label,
+      value: ctcValues.filter((value) => value >= band.min && value < band.max).length,
+    }));
+
+    const branchComparison = programSummaries.map(({ program, summary }) => ({
+      label: program,
+      value: summary.placement_percentage || 0,
+      placed: summary.placed_students,
+      eligible: summary.eligible_students,
+    }));
+
+    const recentCompanies = [...companies]
+      .filter((company) => company.offer_date)
+      .sort((left, right) => new Date(right.offer_date) - new Date(left.offer_date))
+      .slice(0, 5);
+
+    return { compensationBands, branchComparison, recentCompanies };
+  }, [companies, dashboardBranchFilter, programSummaries, students]);
+
+  const companyVisuals = useMemo(() => ({
+    categories: [
+      { label: 'A+', value: filteredCompanies.filter((company) => String(company.category).toUpperCase() === 'A+').length, tone: 'accent' },
+      { label: 'A', value: filteredCompanies.filter((company) => String(company.category).toUpperCase() === 'A').length, tone: 'blue' },
+      { label: 'B', value: filteredCompanies.filter((company) => String(company.category).toUpperCase() === 'B').length, tone: 'amber' },
+    ],
+    types: OFFER_TYPES.map((type) => ({
+      label: type,
+      value: filteredCompanies.filter((company) => company.type === type).length,
+    })),
+    topOffers: [...filteredCompanies]
+      .sort((left, right) => (Number(right.reported_offer_count) || 0) - (Number(left.reported_offer_count) || 0))
+      .slice(0, 8)
+      .map((company) => ({ label: company.name, value: Number(company.reported_offer_count) || 0 })),
+  }), [filteredCompanies]);
+
+  const studentVisuals = useMemo(() => ({
+    statuses: STUDENT_STATUS_OPTIONS.map((status, index) => ({
+      label: status,
+      value: filteredStudents.filter((student) => student.placement_status === status).length,
+      tone: ['accent', 'blue', 'amber', 'muted'][index],
+    })),
+    programs: availablePrograms.map((program) => ({
+      label: program,
+      value: filteredStudents.filter((student) => student.program === program).length,
+    })),
+  }), [availablePrograms, filteredStudents]);
 
   // Toggle sort handler
   const toggleSort = (setter, current, field) => {
@@ -1024,19 +1333,28 @@ const App = () => {
     return <span className="sort-icon">{active ? (current.asc ? '▲' : '▼') : '⇅'}</span>;
   };
 
-  const refresh = async () => {
-    const cachedSnapshot = readBatchCache(activeBatch.key);
-    const hasFallbackData = !!cachedSnapshot || companies.length > 0 || students.length > 0 || Object.keys(stats).length > 0;
-    const initial = isInitialLoad.current && !hasFallbackData;
-    if (initial) setLoading(true);
+  const refresh = (batchKey = activeBatch.key) => {
+    const requestId = ++refreshRequestId.current;
+    const controller = new AbortController();
+    const cachedSnapshot = readBatchCache(batchKey);
+    const hasFallbackData = !!cachedSnapshot;
+    let retryTimer = null;
+    let cancelled = false;
+
+    if (!hasFallbackData) setLoading(true);
 
     let retries = 0;
     const maxRetries = 12; // 12 * 5s = 60s max wait
+    const isCurrentRequest = () => !cancelled && refreshRequestId.current === requestId;
 
     const fetchData = async () => {
       try {
-        await api.get('/ping');
-        const params = { params: { batch: activeBatch.key } };
+        await api.get('/ping', { signal: controller.signal });
+        const params = {
+          params: { batch: batchKey },
+          headers: viewerHeaders.headers,
+          signal: controller.signal,
+        };
         const [statsRes, companyRes, studentRes] = await Promise.all([
           api.get('/stats', params),
           api.get('/companies', params),
@@ -1049,14 +1367,23 @@ const App = () => {
           students: studentRes.data,
         };
 
+        if (!isCurrentRequest()) return;
         setStats(nextSnapshot.stats);
         setCompanies(nextSnapshot.companies);
         setStudents(nextSnapshot.students);
-        writeBatchCache(activeBatch.key, nextSnapshot);
+        writeBatchCache(batchKey, nextSnapshot);
         setError('');
-        isInitialLoad.current = false;
-        if (initial) setLoading(false);
+        setLoading(false);
       } catch (err) {
+        if (!isCurrentRequest() || axios.isCancel(err)) return;
+
+        if (err.response?.status === 401) {
+          handleGoogleLogout();
+          setLoginError('Your viewer session expired. Please sign in again.');
+          setLoading(false);
+          return;
+        }
+
         if (retries < maxRetries) {
           retries++;
           setError(
@@ -1064,39 +1391,32 @@ const App = () => {
               ? `Showing saved data while the server wakes up. Refreshing latest data... (Attempt ${retries}/${maxRetries}).`
               : `Connecting to server... (Attempt ${retries}/${maxRetries}). Please wait while the server wakes up.`
           );
-          setTimeout(fetchData, 5000);
+          retryTimer = window.setTimeout(fetchData, 5000);
         } else {
           setError(
             hasFallbackData
               ? `Showing saved data. Latest refresh failed: ${err.message}`
               : `Network Error: ${err.message}. The server might be down or taking too long.`
           );
-          if (initial) setLoading(false);
+          setLoading(false);
         }
       }
     };
 
     fetchData();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+    };
   };
 
   useEffect(() => {
-    if (isGoogleAuthed) refresh();
+    if (isViewerAuthed) return refresh(activeBatch.key);
+    return undefined;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isGoogleAuthed, activeBatch.key]);
-
-  const handleLogin = async (email, password) => {
-    try {
-      const res = await api.post('/login', { email, password });
-      setToken(res.data.token);
-      localStorage.setItem('adminToken', res.data.token);
-      setError('');
-      navigate('/admin');
-    } catch (err) {
-      setError('Invalid credentials');
-    }
-  };
-
-  const isAdmin = !!token;
+  }, [isViewerAuthed, activeBatch.key]);
 
   const batchPayload = {
     batch_key: activeBatch.key,
@@ -1140,13 +1460,15 @@ const App = () => {
     refresh();
   };
 
-  if (!isGoogleAuthed) {
+  if (!isViewerAuthed) {
     return (
       <LoginScreen
         assetBase={assetBase}
         onSuccess={handleGoogleSuccess}
         onError={handleGoogleError}
+        onViewerLogin={handleViewerLogin}
         error={loginError}
+        pending={authPending}
         themeMode={themeMode}
         onToggleTheme={toggleThemeMode}
       />
@@ -1163,10 +1485,13 @@ const App = () => {
       ].filter(Boolean).join(' ')}>
         <div className="navbar">
           <div className="nav-brand-row">
-            <div className="flex-row nav-logo" style={{ alignItems: 'center' }}>
+            <Link to="/" className="nav-logo" onClick={closeMobileNav}>
               <img src={`${assetBase}iiitd_logo.png`} alt="IIIT Delhi logo" />
-            </div>
-            <span className="badge nav-batch-badge">{activeBatch.label}</span>
+              <span className="nav-wordmark">
+                <strong>Placement Atlas</strong>
+                <small>Placement dashboard</small>
+              </span>
+            </Link>
             <button
               type="button"
               className={mobileNavOpen ? 'nav-toggle active' : 'nav-toggle'}
@@ -1182,21 +1507,22 @@ const App = () => {
           </div>
 
           <div id="primary-navigation" className="nav-main-links">
-            <Link to="/" onClick={closeMobileNav}>Dashboard</Link>
-            <Link to="/companies" onClick={closeMobileNav}>Companies</Link>
-            <Link to="/students" onClick={closeMobileNav}>Students</Link>
+            <Link className={location.pathname === '/' ? 'active' : ''} to="/" onClick={closeMobileNav}>Overview</Link>
+            <Link className={location.pathname === '/companies' ? 'active' : ''} to="/companies" onClick={closeMobileNav}>Companies</Link>
+            <Link className={location.pathname === '/students' ? 'active' : ''} to="/students" onClick={closeMobileNav}>Students</Link>
           </div>
 
           <div className="nav-user-row">
-            {googleEmail && <span className="subtext nav-user-email">{googleEmail}</span>}
+            <label className="nav-batch-select">
+              <span>Cohort</span>
+              <select value={activeBatch.key} onChange={(event) => setActiveBatchKey(event.target.value)}>
+                {BATCHES.map((batch) => <option key={batch.key} value={batch.key}>{batch.label}</option>)}
+              </select>
+            </label>
             <div className="nav-actions">
               <ThemeToggle themeMode={themeMode} onToggle={toggleThemeMode} compact />
-              <button className="secondary" onClick={() => { closeMobileNav(); handleGoogleLogout(); }}>Sign out</button>
-              {isAdmin ? (
-                <button className="secondary" onClick={() => { closeMobileNav(); setToken(''); localStorage.removeItem('adminToken'); navigate('/'); }}>Logout</button>
-              ) : (
-                <Link className="nav-admin-link" to="/admin" onClick={closeMobileNav}>Admin Login</Link>
-              )}
+              <button className="secondary nav-signout" title="End viewer session" onClick={() => { closeMobileNav(); handleGoogleLogout(); }}>Sign out</button>
+              {isAdmin && <Link className="nav-admin-link" to="/admin" onClick={closeMobileNav}>Viewer Access</Link>}
             </div>
           </div>
         </div>
@@ -1206,351 +1532,491 @@ const App = () => {
         <Route
           path="/"
           element={(
-            <div className="container">
-              <div className="batch-tabs">
+            <main className="container dashboard-page">
+              <div className="batch-tabs" aria-label="Select placement cohort">
                 {BATCHES.map((batch) => (
-                  <button
-                    key={batch.key}
-                    type="button"
-                    className={activeBatch.key === batch.key ? 'batch-tab active' : 'batch-tab'}
-                    onClick={() => setActiveBatchKey(batch.key)}
-                  >
-                    {batch.label}
+                  <button key={batch.key} type="button" className={activeBatch.key === batch.key ? 'batch-tab active' : 'batch-tab'} onClick={() => setActiveBatchKey(batch.key)}>
+                    <span>{batch.degree}</span><strong>{batch.academic_year || batch.graduation_year}</strong>
                   </button>
                 ))}
               </div>
 
-              <div
-                className="hero"
-                style={{
-                  backgroundImage: `url(${assetBase}institute18-3.jpg)`,
-                }}
-              >
-                <div className="hero-copy">
-                  <div className="badge hero-badge">Selected Cohort</div>
-                  <h1>Placement Data for {activeBatch.label} Passout Batch</h1>
-                  <p className="subtext hero-subtext">
-                    Dashboard defaults to M.Tech 2027. Use the branch filter in the overall section to narrow the actual programs shown for the selected batch.
+              <section className="editorial-hero">
+                <div className="editorial-hero-copy">
+                  <span className="eyebrow">{isOfficial2026 ? 'Tracker dataset' : 'Placement intelligence'} · {activeBatch.label}</span>
+                  <h1>{isAggregateOnly ? 'A historical view of M.Tech CSE hiring.' : isOfficial2025 ? 'The official picture for the graduating class of 2025.' : isPlacementRecordsOnly ? 'Recorded outcomes from an earlier placement season.' : 'The shape of a cohort, beyond a spreadsheet.'}</h1>
+                  <p>
+                    {isAggregateOnly
+                      ? `Company-level roles and reported offer counts for academic year ${activeBatch.academic_year}. Student-level and compensation data were not included in the source.`
+                      : isOfficial2025
+                        ? `Official institute-level placement statistics for the batch graduating in 2025. Uploaded student records remain available in the directories but are not used to infer placement percentages.`
+                      : isPlacementRecordsOnly
+                        ? `Student-level placement records for students passing out in ${activeBatch.graduation_year}. The source lists placed students only, so a cohort placement percentage is not shown.`
+                        : `An evidence-led view of opportunity, outcomes, and compensation for students passing out in ${activeBatch.graduation_year}.`}
                   </p>
+                  <div className="hero-actions">
+                    <Link className="primary-link" to="/companies">Explore companies</Link>
+                    {!isAggregateOnly && <Link className="text-link" to="/students">Browse student outcomes <span aria-hidden="true">→</span></Link>}
+                  </div>
                   {error && <p className="hero-error">{error}</p>}
                 </div>
-                <div className="grid hero-stats">
-                  <div className="card hero-stat-card">
-                    <div className="stat-label"><MetricLabel metricKey="number_of_companies">Total Companies</MetricLabel></div>
-                    <div className="stat-value hero-stat-value">{stats.number_of_companies ?? '—'}</div>
-                  </div>
-                  <div className="card hero-stat-card">
-                    <div className="stat-label"><MetricLabel metricKey="total_offers">Total Offers</MetricLabel></div>
-                    <div className="stat-value hero-stat-value">{stats.total_offers ?? '—'}</div>
-                  </div>
-                  <div className="card hero-stat-card hero-stat-card--wide">
-                    <div className="stat-label"><MetricLabel metricKey="overall_placement_percentage">Placement %</MetricLabel></div>
-                    <div className="stat-value hero-stat-value">{formatPct(stats.overall_placement_percentage)}</div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="section-header">
-                <h3>Key Metrics</h3>
-                <Link to="/admin" className="subtext">Admin actions</Link>
-              </div>
-
-              <div className="card disclaimer-card">
-                <div className="stat-label disclaimer-label">Disclaimer</div>
-                <p style={{ margin: '6px 0 0', fontSize: 14, lineHeight: 1.4 }}>
-                  This is an unofficial side project; data is not verified by the Placement Office. If you notice any genuine discrepancy, please email yash25091@iiitd.ac.in. The author is not responsible for incorrect data.
-                </p>
-              </div>
-
-              <div className="grid" style={{ gridTemplateColumns: '1fr', gap: 16 }}>
-                {[{ key: 'overall', title: 'Overall', variant: 'large' }].map((section) => {
-                  const data = activeOverviewSummary;
-                  const metrics = [
-                    { key: 'eligible_students', label: 'Eligible & Sitting', value: data.eligible_students },
-                    { key: 'placed_students', label: 'Placed', value: data.placed_students },
-                    { key: 'unplaced_students', label: 'Unplaced (Eligible)', value: data.unplaced_students },
-                    { key: 'excluded_students', label: 'Excluded', value: data.excluded_students },
-                    { key: 'total_intern_offers', label: 'Intern Offers', value: data.total_intern_offers },
-                    { key: 'total_fte_offers', label: 'FTE Offers', value: data.total_fte_offers },
-                    { key: 'total_combo_offers', label: 'Intern+FTE Offers', value: data.total_combo_offers },
-                    { key: 'total_Aplus_offers', label: 'A+ Offers', value: data.total_Aplus_offers },
-                    { key: 'total_A_offers', label: 'A Offers', value: data.total_A_offers },
-                    { key: 'total_B_offers', label: 'B Offers', value: data.total_B_offers },
-                    { key: 'highest_ctc', label: 'Highest CTC', value: formatInr(data.highest_ctc, 'p.a.') },
-                    { key: 'average_ctc', label: 'Avg CTC', value: formatInr(data.average_ctc, 'p.a.') },
-                    { key: 'median_ctc', label: 'Median CTC', value: formatInr(data.median_ctc, 'p.a.') },
-                    { key: 'highest_stipend', label: 'Highest Stipend', value: formatInr(data.highest_stipend, 'p.m.') },
-                    { key: 'average_stipend', label: 'Avg Stipend', value: formatInr(data.average_stipend, 'p.m.') },
-                    { key: 'placement_percentage', label: 'Placement %', value: formatPct(data.placement_percentage) },
-                    { key: 'internship_percentage', label: 'Internship %', value: formatPct(data.internship_percentage) },
-                  ];
-                  return (
-                    <div key={section.key} className="card dashboard-overview-card">
-                      <div className="section-header dashboard-overview-header" style={{ marginTop: 0, marginBottom: 12 }}>
-                        <div>
-                          <h3 style={{ margin: 0 }}>
-                            {dashboardBranchFilter === 'ALL' ? section.title : `${DASHBOARD_BRANCH_LABELS[dashboardBranchFilter] || dashboardBranchFilter} Overview`}
-                          </h3>
-                          <span className="subtext">
-                            {dashboardBranchFilter === 'ALL'
-                              ? `Passing out in ${activeBatch.graduation_year}`
-                              : `Consolidated data for ${DASHBOARD_BRANCH_LABELS[dashboardBranchFilter] || dashboardBranchFilter} · Passing out in ${activeBatch.graduation_year}`}
-                          </span>
-                        </div>
-                        <div className="dashboard-filter-group">
-                          <span className="subtext">Branch filter</span>
-                          <div className="filter-chip-row">
-                            {dashboardBranchFilters.map((branchGroup) => (
-                              <button
-                                key={branchGroup}
-                                type="button"
-                                className={dashboardBranchFilter === branchGroup ? 'filter-chip active' : 'filter-chip'}
-                                onClick={() => setDashboardBranchFilter(branchGroup)}
-                              >
-                                {DASHBOARD_BRANCH_LABELS[branchGroup] || branchGroup}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="grid dashboard-overview-metrics" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-                        {metrics.map((m) => (
-                          <div key={m.label}>
-                            <div className="stat-label" style={{ fontSize: 12 }}><MetricLabel metricKey={m.key}>{m.label}</MetricLabel></div>
-                            <div className="stat-value" style={{ fontSize: 16 }}>{m.value ?? '—'}</div>
-                          </div>
-                        ))}
-                      </div>
+                <div className="hero-outcome-panel">
+                  {isAggregateOnly ? (
+                    <div className="historical-total">
+                      <span className="eyebrow">Reported offers</span>
+                      <strong>{activeOverviewSummary.total_offers || 0}</strong>
+                      <p>M.Tech CSE aggregate</p>
                     </div>
-                  );
-                })}
-
-                <div className="card dashboard-programs-panel">
-                  <div className="section-header" style={{ marginTop: 0, marginBottom: 16 }}>
-                    <div>
-                      <h3 style={{ margin: 0 }}>Programs In {activeBatch.label}</h3>
-                      <span className="subtext">
-                        {dashboardBranchFilter === 'ALL'
-                          ? 'Showing every program in this cohort.'
-                          : `Showing programs in the ${DASHBOARD_BRANCH_LABELS[dashboardBranchFilter] || dashboardBranchFilter.toLowerCase()}.`}
-                      </span>
+                  ) : isOfficial2025 ? (
+                    <div className="historical-total">
+                      <span className="eyebrow">Official campus placement</span>
+                      <strong>{OFFICIAL_2025.campus_placement_percentage}%</strong>
+                      <p>Batch graduated in 2025</p>
                     </div>
-                    <span className="badge">{filteredProgramSummaries.length} programs</span>
-                  </div>
-
-                  {filteredProgramSummaries.length ? (
-                    <div className="program-summary-grid">
-                      {filteredProgramSummaries.map(({ program, branchGroup, summary }) => {
-                        const metrics = [
-                          { key: 'eligible_students', label: 'Eligible & Sitting', value: summary.eligible_students },
-                          { key: 'placed_students', label: 'Placed', value: summary.placed_students },
-                          { key: 'unplaced_students', label: 'Unplaced (Eligible)', value: summary.unplaced_students },
-                          { key: 'excluded_students', label: 'Excluded', value: summary.excluded_students },
-                          { key: 'total_intern_offers', label: 'Intern Offers', value: summary.total_intern_offers },
-                          { key: 'total_fte_offers', label: 'FTE Offers', value: summary.total_fte_offers },
-                          { key: 'total_combo_offers', label: 'Intern+FTE Offers', value: summary.total_combo_offers },
-                          { key: 'total_Aplus_offers', label: 'A+ Offers', value: summary.total_Aplus_offers },
-                          { key: 'total_A_offers', label: 'A Offers', value: summary.total_A_offers },
-                          { key: 'total_B_offers', label: 'B Offers', value: summary.total_B_offers },
-                          { key: 'highest_ctc', label: 'Highest CTC', value: formatInr(summary.highest_ctc, 'p.a.') },
-                          { key: 'average_ctc', label: 'Avg CTC', value: formatInr(summary.average_ctc, 'p.a.') },
-                          { key: 'median_ctc', label: 'Median CTC', value: formatInr(summary.median_ctc, 'p.a.') },
-                          { key: 'highest_stipend', label: 'Highest Stipend', value: formatInr(summary.highest_stipend, 'p.m.') },
-                          { key: 'average_stipend', label: 'Avg Stipend', value: formatInr(summary.average_stipend, 'p.m.') },
-                          { key: 'placement_percentage', label: 'Placement %', value: formatPct(summary.placement_percentage) },
-                          { key: 'internship_percentage', label: 'Internship %', value: formatPct(summary.internship_percentage) },
-                        ];
-
-                        return (
-                          <div key={program} className="program-summary-card">
-                            <div className="program-summary-header">
-                              <div>
-                                <h3>{program}</h3>
-                                <span className="subtext">Actual program in {activeBatch.label}</span>
-                              </div>
-                              <span className="program-summary-badge">{branchGroup}</span>
-                            </div>
-
-                            <div className="program-summary-metrics">
-                              {metrics.map((metric) => (
-                                <div key={metric.label} className="program-summary-metric">
-                                  <div className="stat-label"><MetricLabel metricKey={metric.key}>{metric.label}</MetricLabel></div>
-                                  <div className="stat-value" style={{ fontSize: 16 }}>{metric.value ?? '—'}</div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })}
+                  ) : isPlacementRecordsOnly ? (
+                    <div className="historical-total">
+                      <span className="eyebrow">Recorded placed students</span>
+                      <strong>{activeOverviewSummary.placed_students || 0}</strong>
+                      <p>Placement records only</p>
                     </div>
                   ) : (
-                    <div className="program-summary-empty">
-                      No programs match the selected branch filter for this batch.
-                    </div>
+                    <>
+                      <div className="hero-outcome-topline">
+                        <span>Overall placement</span>
+                        <small>{activeOverviewSummary.eligible_students || 0} eligible students</small>
+                      </div>
+                      <DonutChart
+                        value={activeOverviewSummary.placed_students}
+                        total={activeOverviewSummary.eligible_students}
+                        label="Placement rate"
+                        detail={`${activeOverviewSummary.placed_students || 0} placed`}
+                      />
+                    </>
                   )}
+                  <div className="hero-mini-facts">
+                    <div><strong>{isOfficial2025 ? OFFICIAL_2025.companies : stats.number_of_companies ?? 0}</strong><span>companies</span></div>
+                    <div><strong>{isOfficial2025 ? OFFICIAL_2025.total_offers : activeOverviewSummary.total_offers || 0}</strong><span>offers</span></div>
+                    <div><strong>{isOfficial2025 ? `${official2025AverageLpa} LPA` : isAggregateOnly ? stats.total_companies_listed || 0 : isPlacementRecordsOnly ? activeOverviewSummary.placed_students || 0 : activeOverviewSummary.unplaced_students || 0}</strong><span>{isOfficial2025 ? `${activeBatch.degree} average` : isAggregateOnly ? 'listed' : isPlacementRecordsOnly ? 'students' : 'seeking'}</span></div>
+                  </div>
                 </div>
-              </div>
-            </div>
+              </section>
+
+              {isAggregateOnly && (
+                <section className="historical-overview">
+                  <div className="section-intro">
+                    <div><span className="eyebrow">Aggregate source</span><h2>Offer volume by recruiter.</h2></div>
+                    <p>This archive covers M.Tech CSE only. Counts are reported offers, not unique students, and companies with zero offers are retained in the source total.</p>
+                  </div>
+                  <div className="historical-summary-grid">
+                    <MetricTile label="Reported offers" value={stats.total_offers || 0} note={`Academic year ${activeBatch.academic_year}`} />
+                    <MetricTile label="Companies with offers" value={stats.number_of_companies || 0} note="Positive offer count" />
+                    <MetricTile label="Recruiters listed" value={stats.total_companies_listed || 0} note="Includes zero-offer rows" />
+                  </div>
+                  <article className="insight-panel historical-ranking">
+                    <div className="panel-heading"><div><span className="eyebrow">Leading recruiters</span><h2>Highest reported offer counts</h2></div></div>
+                    <HorizontalBars items={companyVisuals.topOffers} />
+                  </article>
+                </section>
+              )}
+
+              {!isAggregateOnly && (
+                <>
+              {isOfficial2025 && (
+                <section className="official-placement-dashboard">
+                  <aside className="official-data-note">
+                    <div>
+                      <span className="eyebrow">Official 2025 statistics</span>
+                      <h2>Placement percentage cannot be inferred from uploaded offer lists.</h2>
+                    </div>
+                    <p>The student files contain placement outcomes but not the complete eligible graduating cohort. Therefore, this dashboard uses only the officially provided 2025 figures for percentages and campus totals. Student and company directories are retained as record-level references.</p>
+                  </aside>
+
+                  <section className="metric-ledger official-metric-ledger">
+                    <MetricTile label="Companies visited" value={OFFICIAL_2025.companies} note={`${OFFICIAL_2025.full_time_companies} full time · ${OFFICIAL_2025.summer_internship_companies} summer internship`} />
+                    <MetricTile label="Total offers" value={OFFICIAL_2025.total_offers} note={`${OFFICIAL_2025.full_time_offers} full time · ${OFFICIAL_2025.internship_offers} internship`} />
+                    <MetricTile label={`${activeBatch.degree} average`} value={`${official2025AverageLpa.toFixed(2)} LPA`} note={`Overall campus average ${OFFICIAL_2025.overall_average_lpa} LPA`} />
+                    <MetricTile label="Highest overseas" value={`${OFFICIAL_2025.highest_overseas_lpa} LPA`} note={`${OFFICIAL_2025.overseas_offers} overseas offers`} />
+                  </section>
+
+                  <section className="insight-grid official-insight-grid">
+                    <article className="insight-panel outcome-panel">
+                      <div className="panel-heading"><div><span className="eyebrow">Offer composition</span><h2>Full-time and internship outcomes</h2></div><span className="panel-number">{OFFICIAL_2025.total_offers}</span></div>
+                      <SegmentedBar label="Official offers" items={[
+                        { label: 'Full time', value: OFFICIAL_2025.full_time_offers, tone: 'accent' },
+                        { label: 'Internship', value: OFFICIAL_2025.internship_offers, tone: 'blue' },
+                      ]} />
+                      <div className="official-offer-geography">
+                        <div><span>Indian full-time offers</span><strong>{OFFICIAL_2025.indian_offers}</strong></div>
+                        <div><span>Overseas offers</span><strong>{OFFICIAL_2025.overseas_offers}</strong></div>
+                        <div><span>Highest Indian, {activeBatch.degree}</span><strong>{official2025HighestIndianLpa} LPA</strong></div>
+                      </div>
+                    </article>
+
+                    <article className="insight-panel">
+                      <div className="panel-heading"><div><span className="eyebrow">Full-time quality</span><h2>Official offer categories</h2></div></div>
+                      <SegmentedBar label="559 full-time offers" items={OFFICIAL_2025.categories.map((category, index) => ({
+                        label: category.label,
+                        value: category.value,
+                        tone: index === 0 ? 'accent' : index === 1 ? 'blue' : 'amber',
+                      }))} />
+                      <div className="offer-type-ledger official-category-notes">
+                        {OFFICIAL_2025.categories.map((category) => <div key={category.label}><span>{category.label}</span><strong>{category.note}</strong></div>)}
+                      </div>
+                    </article>
+                  </section>
+
+                  <section className="dashboard-section branch-section official-program-rates">
+                    <div className="section-intro">
+                      <div><span className="eyebrow">Official program percentages</span><h2>{activeBatch.degree} placement outcomes</h2></div>
+                      <p>These percentages are official figures for the batch graduating in 2025, not calculations from the uploaded student records.</p>
+                    </div>
+                    <div className="branch-comparison-list">
+                      {official2025Programs.map((program) => (
+                        <div key={program.label} className="branch-comparison-row">
+                          <div className="branch-name"><strong>{program.label}</strong><span>Official placement percentage</span></div>
+                          <div className="branch-progress"><span style={{ width: `${program.value}%` }} /></div>
+                          <strong className="branch-rate">{program.value.toFixed(2)}%</strong>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                </section>
+              )}
+              {isOfficial2026 && (
+                <section className="official-placement-dashboard official-2026-dashboard">
+                  <aside className="official-data-note">
+                    <div>
+                      <span className="eyebrow">College-published statistics · 2026</span>
+                      <h2>Official institute figures, shown separately from this tracker.</h2>
+                    </div>
+                    <p>These campus-wide figures were officially published for the batch graduating in 2026. They are not calculated from our uploaded student and company records, so differences may reflect publication timing, coverage, or institute methodology.</p>
+                  </aside>
+
+                  <section className="metric-ledger official-metric-ledger">
+                    <MetricTile label="Companies visited" value={OFFICIAL_2026.companies} note={`${OFFICIAL_2026.full_time_companies} full time · ${OFFICIAL_2026.summer_internship_companies} summer internship`} />
+                    <MetricTile label="Total offers" value={OFFICIAL_2026.total_offers} note={`${OFFICIAL_2026.full_time_offers} full time · ${OFFICIAL_2026.internship_offers} summer internship`} />
+                    <MetricTile label={`${activeBatch.degree} average`} value={`${official2026AverageLpa.toFixed(2)} LPA`} note={`Overall campus average ${OFFICIAL_2026.overall_average_lpa} LPA`} />
+                    <MetricTile label="Campus placement" value={`${OFFICIAL_2026.campus_placement_percentage.toFixed(2)}%`} note="Official campus-wide percentage" />
+                  </section>
+
+                  <section className="insight-grid official-insight-grid">
+                    <article className="insight-panel outcome-panel">
+                      <div className="panel-heading"><div><span className="eyebrow">Official offer composition</span><h2>Full-time and summer internship offers</h2></div><span className="panel-number">{OFFICIAL_2026.total_offers}</span></div>
+                      <SegmentedBar label="College-published offers" items={[
+                        { label: 'Full time', value: OFFICIAL_2026.full_time_offers, tone: 'accent' },
+                        { label: 'Summer internship', value: OFFICIAL_2026.internship_offers, tone: 'blue' },
+                      ]} />
+                      <div className="official-offer-geography">
+                        <div><span>Indian full-time offers</span><strong>{OFFICIAL_2026.indian_offers}</strong></div>
+                        <div><span>Overseas offers</span><strong>{OFFICIAL_2026.overseas_offers}</strong></div>
+                        <div><span>Highest Indian, {activeBatch.degree}</span><strong>{official2026HighestIndianLpa.toFixed(2)} LPA</strong></div>
+                        <div><span>Highest overseas</span><strong>{OFFICIAL_2026.highest_overseas_lpa.toFixed(2)} LPA</strong></div>
+                      </div>
+                    </article>
+
+                    <article className="insight-panel">
+                      <div className="panel-heading"><div><span className="eyebrow">Official full-time quality</span><h2>Published offer categories</h2></div></div>
+                      <SegmentedBar label={`${OFFICIAL_2026.full_time_offers} full-time offers`} items={OFFICIAL_2026.categories.map((category, index) => ({
+                        label: category.label,
+                        value: category.value,
+                        tone: index === 0 ? 'accent' : index === 1 ? 'blue' : 'amber',
+                      }))} />
+                      <div className="offer-type-ledger official-category-notes">
+                        {OFFICIAL_2026.categories.map((category) => <div key={category.label}><span>{category.label}</span><strong>{category.note}</strong></div>)}
+                      </div>
+                      <p className="official-publication-note">{OFFICIAL_2026.note}</p>
+                    </article>
+                  </section>
+
+                  <section className="dashboard-section branch-section official-program-rates">
+                    <div className="section-intro">
+                      <div><span className="eyebrow">Official program percentages</span><h2>{activeBatch.degree} placement outcomes</h2></div>
+                      <p>College-published percentages for the batch graduating in 2026. The tracker-derived program comparison remains available below.</p>
+                    </div>
+                    <div className="branch-comparison-list">
+                      {official2026Programs.map((program) => (
+                        <div key={program.label} className="branch-comparison-row">
+                          <div className="branch-name"><strong>{program.label}</strong><span>Official placement percentage</span></div>
+                          <div className="branch-progress"><span style={{ width: `${program.value}%` }} /></div>
+                          <strong className="branch-rate">{program.value.toFixed(2)}%</strong>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+
+                  <div className="dataset-divider">
+                    <span className="eyebrow">Tracker dataset · {activeBatch.label}</span>
+                    <h2>Recorded data on this website</h2>
+                    <p>The dashboard below is calculated only from student, company, and offer records currently stored in this tracker. It is intentionally separate from the official publication above.</p>
+                  </div>
+                </section>
+              )}
+              {isPlacementRecordsOnly && !isOfficial2025 && (
+                <aside className="disclaimer-card">
+                  <span className="eyebrow">Historical source scope</span>
+                  <p>This source contains placement outcomes, not the full graduating roster. Counts and compensation are shown, but placement percentages and unplaced-student totals are intentionally not inferred.</p>
+                  {stats.historical_reported_offers > 0 && <p>The same M.Tech 2025 view also includes the 2024-25 CSE aggregate: {stats.historical_reported_offers} reported offers across {stats.historical_recruiters} recruiters. These aggregate counts are labeled separately from student-linked offers.</p>}
+                </aside>
+              )}
+              {!isOfficial2025 && <section className="dashboard-control-row">
+                <div>
+                  <span className="eyebrow">Current lens</span>
+                  <h2>{dashboardBranchFilter === 'ALL' ? 'All programs' : DASHBOARD_BRANCH_LABELS[dashboardBranchFilter]}</h2>
+                </div>
+                <div className="filter-chip-row">
+                  {dashboardBranchFilters.map((branchGroup) => (
+                    <button key={branchGroup} type="button" className={dashboardBranchFilter === branchGroup ? 'filter-chip active' : 'filter-chip'} onClick={() => setDashboardBranchFilter(branchGroup)}>
+                      {DASHBOARD_BRANCH_LABELS[branchGroup] || branchGroup}
+                    </button>
+                  ))}
+                </div>
+              </section>}
+
+              {!isOfficial2025 && <section className="metric-ledger comp-ledger">
+                <MetricTile metricKey="highest_ctc" label="Highest CTC" value={formatInr(activeOverviewSummary.highest_ctc, 'p.a.')} note="Peak recorded package" />
+                <MetricTile metricKey="median_ctc" label="Median CTC" value={formatInr(activeOverviewSummary.median_ctc, 'p.a.')} note="Middle of recorded offers" />
+                <MetricTile metricKey="average_ctc" label="Average CTC" value={formatInr(activeOverviewSummary.average_ctc, 'p.a.')} note="Mean of recorded offers" />
+                <MetricTile metricKey="median_stipend" label="Median stipend" value={formatInr(activeOverviewSummary.median_stipend, 'p.m.')} note="Middle of recorded stipends" />
+                <MetricTile metricKey="average_stipend" label="Average stipend" value={formatInr(activeOverviewSummary.average_stipend, 'p.m.')} note="Across available stipend data" />
+                <MetricTile metricKey="total_Aplus_offers" label="A+ offers" value={activeOverviewSummary.total_Aplus_offers || 0} note="Premium category outcomes" />
+              </section>}
+
+              {!isOfficial2025 && <section className="insight-grid">
+                <article className="insight-panel outcome-panel">
+                  <div className="panel-heading">
+                    <div><span className="eyebrow">Outcome composition</span><h2>{isPlacementRecordsOnly ? 'Recorded placed students' : 'Where the cohort stands'}</h2></div>
+                    <span className="panel-number">{activeOverviewSummary.total_students || 0}</span>
+                  </div>
+                  <SegmentedBar label={isPlacementRecordsOnly ? 'Source records' : 'Student status'} items={isPlacementRecordsOnly ? [
+                    { label: 'Placed records', value: activeOverviewSummary.placed_students || 0, tone: 'accent' },
+                  ] : [
+                    { label: 'Placed', value: activeOverviewSummary.placed_students || 0, tone: 'accent' },
+                    { label: 'Eligible, unplaced', value: activeOverviewSummary.unplaced_students || 0, tone: 'blue' },
+                    { label: 'Excluded', value: activeOverviewSummary.excluded_students || 0, tone: 'muted' },
+                  ]} />
+                  <div className="dual-donuts">
+                    <DonutChart value={activeOverviewSummary.total_fte_offers} total={activeOverviewSummary.total_students} label="FTE intensity" detail={`${activeOverviewSummary.total_fte_offers || 0} offers`} tone="blue" />
+                    <DonutChart
+                      value={(activeOverviewSummary.total_intern_offers || 0) + (activeOverviewSummary.total_combo_offers || 0)}
+                      total={activeOverviewSummary.total_students}
+                      label="Internship intensity"
+                      detail={`${(activeOverviewSummary.total_intern_offers || 0) + (activeOverviewSummary.total_combo_offers || 0)} offers with internship`}
+                    />
+                  </div>
+                </article>
+
+                <article className="insight-panel">
+                  <div className="panel-heading"><div><span className="eyebrow">Offer quality</span><h2>Category mix</h2></div></div>
+                  <SegmentedBar label="Recorded offers" items={[
+                    { label: 'A+', value: activeOverviewSummary.total_Aplus_offers || 0, tone: 'accent' },
+                    { label: 'A', value: activeOverviewSummary.total_A_offers || 0, tone: 'blue' },
+                    { label: 'B', value: activeOverviewSummary.total_B_offers || 0, tone: 'amber' },
+                  ]} />
+                  <div className="offer-type-ledger">
+                    <div><span>FTE</span><strong>{activeOverviewSummary.total_fte_offers || 0}</strong></div>
+                    <div><span>Intern only</span><strong>{activeOverviewSummary.total_intern_offers || 0}</strong></div>
+                    <div><span>Combined</span><strong>{activeOverviewSummary.total_combo_offers || 0}</strong></div>
+                  </div>
+                </article>
+
+                <article className="insight-panel compensation-panel">
+                  <div className="panel-heading"><div><span className="eyebrow">Compensation</span><h2>CTC distribution</h2></div><small>Offer count by band</small></div>
+                  <HorizontalBars items={dashboardVisuals.compensationBands} />
+                </article>
+              </section>}
+
+              {!isPlacementRecordsOnly && <section className="dashboard-section branch-section">
+                <div className="section-intro">
+                  <div><span className="eyebrow">Program comparison</span><h2>Every discipline has its own story.</h2></div>
+                  <p>Placement rates use eligible and sitting students as the denominator. Offer counts may exceed placed students where multiple offers are recorded.</p>
+                </div>
+                <div className="branch-comparison-list">
+                  {dashboardVisuals.branchComparison.map((item) => (
+                    <div key={item.label} className="branch-comparison-row">
+                      <div className="branch-name"><strong>{item.label}</strong><span>{item.placed} of {item.eligible} placed</span></div>
+                      <div className="branch-progress"><span style={{ width: `${Math.min(item.value, 100)}%` }} /></div>
+                      <strong className="branch-rate">{formatPct(item.value)}</strong>
+                    </div>
+                  ))}
+                </div>
+              </section>}
+
+              {!isOfficial2025 && <section className="dashboard-section program-section">
+                <div className="section-intro">
+                  <div><span className="eyebrow">Program notes</span><h2>A closer reading.</h2></div>
+                  <span className="section-count">{filteredProgramSummaries.length} programs</span>
+                </div>
+                <div className="program-editorial-grid">
+                  {filteredProgramSummaries.map(({ program, branchGroup, summary }) => (
+                    <article key={program} className="program-editorial-card">
+                      <div className="program-card-top"><span>{branchGroup}</span><strong>{isPlacementRecordsOnly ? `${summary.placed_students} placed` : formatPct(summary.placement_percentage)}</strong></div>
+                      <h3>{program}</h3>
+                      <p>{isPlacementRecordsOnly ? `${summary.placed_students} placed students with ${summary.total_offers} recorded offers.` : `${summary.placed_students} placed from ${summary.eligible_students} eligible students, with ${summary.total_offers} recorded offers.`}</p>
+                      <dl>
+                        <div><dt>Median CTC</dt><dd>{formatInr(summary.median_ctc, 'p.a.')}</dd></div>
+                        <div><dt>Average CTC</dt><dd>{formatInr(summary.average_ctc, 'p.a.')}</dd></div>
+                        <div><dt>Highest CTC</dt><dd>{formatInr(summary.highest_ctc, 'p.a.')}</dd></div>
+                        <div><dt>A+ offers</dt><dd>{summary.total_Aplus_offers}</dd></div>
+                      </dl>
+                    </article>
+                  ))}
+                </div>
+              </section>}
+
+              {!isOfficial2025 && <section className="dashboard-section recent-section">
+                <div className="section-intro"><div><span className="eyebrow">Recent records</span><h2>Latest offer dates.</h2></div><Link className="text-link" to="/companies">All companies →</Link></div>
+                <div className="recent-company-list">
+                  {dashboardVisuals.recentCompanies.map((company, index) => (
+                    <button key={company.id} type="button" onClick={() => { setSelectedCompany(company); navigate('/companies'); }}>
+                      <span className="recent-index">{String(index + 1).padStart(2, '0')}</span>
+                      <span className="company-monogram">{initialsFor(company.name)}</span>
+                      <span className="recent-company-copy"><strong>{company.name}</strong><small>{company.role || company.type}</small></span>
+                      <span className="recent-company-date">{formatDate(company.offer_date)}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>}
+                </>
+              )}
+
+              <aside className="disclaimer-card">
+                <span className="eyebrow">Data note</span>
+                <p>This is an unofficial side project and is not verified by the Placement Office. Report genuine discrepancies to yash25091@iiitd.ac.in.</p>
+                <Link to="/admin">Administrative access</Link>
+              </aside>
+            </main>
           )}
         />
 
         <Route
           path="/companies"
           element={(
-            <div className="container section-page companies-page">
-              <div className="section-hero companies-hero">
-                <div className="section-hero-copy">
-                  <div className="badge section-badge">Companies</div>
-                  <h1>Company opportunities for {activeBatch.label}</h1>
-                  <p className="subtext section-hero-subtext">
-                    Explore the hiring landscape with tracked branch hires, cleaner recruiter rows, and a more polished view of this batch.
-                  </p>
+            <main className="container section-page companies-page">
+              <section className="directory-hero">
+                <div className="directory-hero-copy">
+                  <span className="eyebrow">Company index · {activeBatch.label}</span>
+                  <h1>Recruiters, roles, and the opportunities they created.</h1>
+                  <p>{isAggregateOnly ? 'Explore company roles and reported M.Tech CSE offer counts from the historical aggregate.' : 'Explore compensation, eligibility, offer type, and the actual branch footprint of every recorded company.'}</p>
                 </div>
-                <div className="section-summary-grid">
-                  <div className="section-summary-card">
-                    <div className="section-summary-label">Visible Companies</div>
-                    <div className="section-summary-value">{companyOverview.total}</div>
-                    <div className="section-summary-footnote">{companyOverview.activeTypes}</div>
-                  </div>
-                  <div className="section-summary-card">
-                    <div className="section-summary-label">Tracked Hires</div>
-                    <div className="section-summary-value">{companyOverview.trackedHires}</div>
-                    <div className="section-summary-footnote">Across the visible recruiters</div>
-                  </div>
-                  <div className="section-summary-card">
-                    <div className="section-summary-label">A+ Recruiters</div>
-                    <div className="section-summary-value">{companyOverview.spotlight}</div>
-                    <div className="section-summary-footnote">Premium category companies in this view</div>
-                  </div>
+                <div className="directory-hero-stats">
+                  <MetricTile label="Visible companies" value={companyOverview.total} note={companyOverview.activeTypes} />
+                  <MetricTile label={isAggregateOnly ? 'Reported offers' : 'Tracked hires'} value={companyOverview.trackedHires} note="Across current filters" />
+                  <MetricTile label={isAggregateOnly ? 'Data scope' : 'A+ recruiters'} value={isAggregateOnly ? 'CSE' : companyOverview.spotlight} note={isAggregateOnly ? activeBatch.academic_year : 'Premium category'} />
                 </div>
-              </div>
+              </section>
 
-              <div className="section-header section-page-header">
-                <div>
-                  <h3>Companies · {activeBatch.label}</h3>
-                  <span className="subtext">Refined table styling with recruiter tiers, branch-hiring context, and better scanability.</span>
+              <MobileDisclosure summary="Recruiter insights" className="insight-disclosure" contentClassName="directory-insights">
+                <div className="directory-insight-copy">
+                  <span className="eyebrow">Market composition</span>
+                  <h2>A quick read of the recruiter set.</h2>
+                  <p>Filters update the visual summaries and opportunity cards together.</p>
                 </div>
-                {isAdmin && (
-                  <button onClick={() => { setEditCompany(null); setShowCompanyModal(true); }}>Add Company</button>
+                {isAggregateOnly ? (
+                  <div style={{ gridColumn: 'span 2' }}><HorizontalBars items={companyVisuals.topOffers.slice(0, 5)} /></div>
+                ) : (
+                  <><SegmentedBar label="Company categories" items={companyVisuals.categories} /><HorizontalBars items={companyVisuals.types} /></>
                 )}
-              </div>
+              </MobileDisclosure>
 
-              <div className="toolbar section-toolbar">
+              <section className={isAggregateOnly ? 'directory-toolbar aggregate-directory-toolbar' : 'directory-toolbar'}>
                 <input
                   type="text"
                   className="search-input"
-                  placeholder="Search company..."
+                  placeholder="Search companies by name"
                   value={companySearch}
                   onChange={(e) => setCompanySearch(e.target.value)}
                 />
-                <div className="filter-group">
-                  <label>Type:</label>
-                  <select value={companyFilters.type} onChange={(e) => setCompanyFilters((f) => ({ ...f, type: e.target.value }))}>
-                    <option value="">All</option>
-                    <option value="Intern">Intern</option>
-                    <option value="FTE">FTE</option>
-                    <option value="Intern+FTE">Intern+FTE</option>
-                  </select>
-                </div>
-                <div className="filter-group">
-                  <label>Category:</label>
-                  <select value={companyFilters.category} onChange={(e) => setCompanyFilters((f) => ({ ...f, category: e.target.value }))}>
-                    <option value="">All</option>
-                    <option value="A+">A+</option>
-                    <option value="A">A</option>
-                    <option value="B">B</option>
-                  </select>
-                </div>
-                <div className="filter-group">
-                  <label>Branch group:</label>
-                  <select value={companyFilters.branchGroup} onChange={(e) => setCompanyFilters((f) => ({ ...f, branchGroup: e.target.value }))}>
-                    <option value="">All</option>
-                    <option value="CSE">CSE</option>
-                    <option value="ECE">ECE</option>
-                    <option value="CB">CB</option>
-                  </select>
-                </div>
+                <MobileDisclosure
+                  summary={`Filters & sort${Object.values(companyFilters).filter(Boolean).length ? ` · ${Object.values(companyFilters).filter(Boolean).length} active` : ''}`}
+                  className="toolbar-disclosure"
+                  contentClassName="toolbar-controls"
+                >
+                  {!isAggregateOnly && <div className="filter-group">
+                    <label>Opportunity</label>
+                    <select value={companyFilters.type} onChange={(e) => setCompanyFilters((f) => ({ ...f, type: e.target.value }))}>
+                      <option value="">All</option>
+                      {OFFER_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+                    </select>
+                  </div>}
+                  {!isAggregateOnly && <div className="filter-group">
+                    <label>Category</label>
+                    <select value={companyFilters.category} onChange={(e) => setCompanyFilters((f) => ({ ...f, category: e.target.value }))}>
+                      <option value="">All</option>
+                      <option value="A+">A+</option>
+                      <option value="A">A</option>
+                      <option value="B">B</option>
+                    </select>
+                  </div>}
+                  {!isAggregateOnly && <div className="filter-group">
+                    <label>Hiring branch</label>
+                    <select value={companyFilters.branchGroup} onChange={(e) => setCompanyFilters((f) => ({ ...f, branchGroup: e.target.value }))}>
+                      <option value="">All</option>
+                      <option value="CSE">CSE</option>
+                      <option value="ECE">ECE</option>
+                      <option value="CB">CB</option>
+                    </select>
+                  </div>}
+                  <label className="sort-control">Sort
+                    <select value={companySort.field} onChange={(event) => setCompanySort({ field: event.target.value, asc: event.target.value === 'name' })}>
+                      <option value="name">Company name</option><option value="ctc">Highest CTC</option><option value="stipend">Highest stipend</option><option value="totalHired">Most hires</option><option value="offer_date">Latest offer date</option>
+                    </select>
+                  </label>
+                  {isAdmin && <button onClick={() => { setEditCompany(null); setShowCompanyModal(true); }}>Add company</button>}
+                </MobileDisclosure>
+              </section>
+
+              <div className="directory-result-heading">
+                <div><span className="eyebrow">Opportunity catalogue</span><h2>{filteredCompanies.length} companies</h2></div>
+                <button type="button" className="text-button" onClick={() => setCompanySort((current) => ({ ...current, asc: !current.asc }))}>{companySort.asc ? 'Ascending' : 'Descending'} <SortIcon field={companySort.field} current={companySort} /></button>
               </div>
 
-              <div className="card table-shell table-shell-companies" style={{ overflowX: 'auto' }}>
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th className={`sortable ${companySort.field === 'name' ? 'sorted' : ''}`} onClick={() => toggleSort(setCompanySort, companySort, 'name')}>
-                        Name <SortIcon field="name" current={companySort} />
-                      </th>
-                      <th>Role</th>
-                      <th>Type</th>
-                      <th>Category</th>
-                      <th className={`sortable ${companySort.field === 'ctc' ? 'sorted' : ''}`} onClick={() => toggleSort(setCompanySort, companySort, 'ctc')}>
-                        CTC <SortIcon field="ctc" current={companySort} />
-                      </th>
-                      <th className={`sortable ${companySort.field === 'stipend' ? 'sorted' : ''}`} onClick={() => toggleSort(setCompanySort, companySort, 'stipend')}>
-                        Stipend <SortIcon field="stipend" current={companySort} />
-                      </th>
-                      <th className={`sortable ${companySort.field === 'offer_date' ? 'sorted' : ''}`} onClick={() => toggleSort(setCompanySort, companySort, 'offer_date')}>
-                        Date <SortIcon field="offer_date" current={companySort} />
-                      </th>
-                      <th className={`sortable ${companySort.field === 'totalHired' ? 'sorted' : ''}`} onClick={() => toggleSort(setCompanySort, companySort, 'totalHired')}>
-                        Total <SortIcon field="totalHired" current={companySort} />
-                      </th>
-                      <th className={`sortable ${companySort.field === 'cseHired' ? 'sorted' : ''}`} onClick={() => toggleSort(setCompanySort, companySort, 'cseHired')}>
-                        CSE <SortIcon field="cseHired" current={companySort} />
-                      </th>
-                      <th className={`sortable ${companySort.field === 'eceHired' ? 'sorted' : ''}`} onClick={() => toggleSort(setCompanySort, companySort, 'eceHired')}>
-                        ECE <SortIcon field="eceHired" current={companySort} />
-                      </th>
-                      <th className={`sortable ${companySort.field === 'cbHired' ? 'sorted' : ''}`} onClick={() => toggleSort(setCompanySort, companySort, 'cbHired')}>
-                        CB <SortIcon field="cbHired" current={companySort} />
-                      </th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredCompanies.map((c) => {
-                      const cat = (c.category || '').toUpperCase();
-                      const stats = companyHiringStats[c.id] || { total: 0, CSE: 0, 'CSE-R': 0, ECE: 0, CB: 0 };
-                      const companyRowClass = cat === 'A+'
-                        ? 'company-row company-row-aplus'
-                        : cat === 'A'
-                          ? 'company-row company-row-a'
-                          : cat === 'B'
-                            ? 'company-row company-row-b'
-                            : 'company-row';
-                      return (
-                        <tr key={c.id} className={companyRowClass}>
-                          <td>
-                            <button
-                              className="secondary company-name-button"
-                              onClick={() => setSelectedCompany(c)}
-                            >
-                              {c.name}
-                            </button>
-                          </td>
-                          <td>{c.role}</td>
-                          <td><span className={`chip table-chip table-chip-type table-chip-${(c.type || 'other').toLowerCase().replace('+', '-').replace(/[^a-z-]/g, '')}`}>{c.type || '—'}</span></td>
-                          <td><span className={`chip table-chip table-chip-category table-chip-category-${cat ? cat.toLowerCase().replace('+', 'plus') : 'other'}`}>{c.category || '—'}</span></td>
-                          <td>{c.ctc ?? '—'}</td>
-                          <td>{c.stipend ?? '—'}</td>
-                          <td>{formatDate(c.offer_date)}</td>
-                          <td className="table-cell-strong">{stats.total}</td>
-                          <td>{stats.CSE}</td>
-                          <td>{stats.ECE}</td>
-                          <td>{stats.CB}</td>
-                          <td>
-                            {isAdmin && (
-                              <div className="flex-row">
-                                <button className="secondary" onClick={() => { setEditCompany(c); setShowCompanyModal(true); }}>Edit</button>
-                                <button className="secondary" onClick={() => deleteCompanyAction(c.id)}>Delete</button>
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <section className="company-card-grid">
+                {filteredCompanies.map((company) => {
+                  const hiring = companyHiringStats[company.id] || { total: 0, reported: 0, CSE: 0, ECE: 0, CB: 0 };
+                  const showReportedAggregate = !isAggregateOnly && hiring.reported > 0;
+                  const categoryClass = String(company.category || 'other').toLowerCase().replace('+', 'plus');
+                  return (
+                    <article key={company.id} className={`company-card company-card-${categoryClass}`}>
+                      <button type="button" className="company-card-main" onClick={() => setSelectedCompany(company)}>
+                        <div className={`company-monogram company-monogram-${categoryClass}`}>{initialsFor(company.name)}</div>
+                        <div className="company-card-copy">
+                          <div className="company-card-kicker">
+                            {isAggregateOnly ? <><span>M.Tech CSE</span><span>{company.reported_offer_count || 0} reported offers</span></> : <><span>{company.type || 'Opportunity'}</span><span>{showReportedAggregate ? `${hiring.reported} reported CSE offers` : `Category ${company.category || '—'}`}</span></>}
+                          </div>
+                          <h3>{company.name}</h3>
+                          <p>{company.role || 'Role details not recorded'}</p>
+                        </div>
+                        <span className="company-card-arrow" aria-hidden="true">↗</span>
+                      </button>
+                      <div className="company-card-facts">
+                        {isAggregateOnly ? (
+                          <>
+                            <div><span>Reported offers</span><strong>{company.reported_offer_count || 0}</strong></div>
+                            <div><span>Scope</span><strong>M.Tech CSE</strong></div>
+                            <div><span>Academic year</span><strong>{activeBatch.academic_year}</strong></div>
+                          </>
+                        ) : (
+                          <>
+                            <div><span>CTC</span><strong>{formatInr(company.ctc, 'p.a.')}</strong></div>
+                            <div><span>Stipend</span><strong>{formatInr(company.stipend, 'p.m.')}</strong></div>
+                            <div><span>{showReportedAggregate ? 'Reported CSE offers' : 'Eligibility'}</span><strong>{showReportedAggregate ? hiring.reported : company.eligible_cgpa ? `${company.eligible_cgpa} CGPA` : 'Not listed'}</strong></div>
+                          </>
+                        )}
+                      </div>
+                      <div className="company-hiring-footprint">
+                        <div className="footprint-head"><span>{isAggregateOnly || (!hiring.total && hiring.reported) ? 'Reported aggregate' : 'Hiring footprint'}</span><strong>{isAggregateOnly || (!hiring.total && hiring.reported) ? hiring.reported : hiring.total} {isAggregateOnly || (!hiring.total && hiring.reported) ? 'offers' : 'hires'}</strong></div>
+                        <div className="footprint-bars">
+                          {(isAggregateOnly || (!hiring.total && hiring.reported) ? ['CSE'] : ['CSE', 'ECE', 'CB']).map((branch) => (
+                            <div key={branch}><span>{branch}</span><i><b style={{ width: `${isAggregateOnly || (!hiring.total && hiring.reported) ? 100 : hiring.total ? (hiring[branch] / hiring.total) * 100 : 0}%` }} /></i><strong>{isAggregateOnly || (!hiring.total && hiring.reported) ? hiring.reported : hiring[branch]}</strong></div>
+                          ))}
+                        </div>
+                      </div>
+                      {isAdmin && <div className="card-admin-actions"><button className="secondary" onClick={() => { setEditCompany(company); setShowCompanyModal(true); }}>Edit</button><button className="danger-button" onClick={() => deleteCompanyAction(company.id)}>Delete</button></div>}
+                    </article>
+                  );
+                })}
+                {!filteredCompanies.length && <div className="empty-directory-state"><h3>No companies found.</h3><p>Try widening the current search or filters.</p></div>}
+              </section>
 
               {/* Add/Edit Company Modal */}
               <Modal open={showCompanyModal} onClose={() => setShowCompanyModal(false)}>
@@ -1565,91 +2031,85 @@ const App = () => {
               {/* Company Detail Modal */}
               <Modal open={!!selectedCompany} onClose={() => setSelectedCompany(null)}>
                 {selectedCompany && (() => {
-                  const stats = companyHiringStats[selectedCompany.id] || { total: 0, CSE: 0, ECE: 0, CB: 0, OTHER: 0, students: [] };
+                  const stats = companyHiringStats[selectedCompany.id] || { total: 0, reported: 0, CSE: 0, ECE: 0, CB: 0, OTHER: 0, students: [] };
                   return (
                     <div className="company-detail">
-                      <h3>{selectedCompany.name}</h3>
+                      <div className="detail-hero-row">
+                        <span className="company-monogram company-monogram-large">{initialsFor(selectedCompany.name)}</span>
+                        <div>
+                          <span className="eyebrow">{selectedCompany.type || 'Opportunity'} · Category {selectedCompany.category || '—'}</span>
+                          <h2>{selectedCompany.name}</h2>
+                          <p>{selectedCompany.role || 'Role details not recorded'}</p>
+                        </div>
+                      </div>
                       <div className="info-grid">
+                        {isAggregateOnly ? (
+                          <>
+                            <div className="info-item"><div className="label">Reported offers</div><div className="value">{selectedCompany.reported_offer_count || 0}</div></div>
+                            <div className="info-item"><div className="label">Scope</div><div className="value">M.Tech CSE</div></div>
+                            <div className="info-item"><div className="label">Academic year</div><div className="value">{activeBatch.academic_year}</div></div>
+                          </>
+                        ) : (
+                          <>
                         <div className="info-item">
-                          <div className="label">Role</div>
-                          <div className="value">{selectedCompany.role || '—'}</div>
-                        </div>
-                        <div className="info-item">
-                          <div className="label">Type</div>
-                          <div className="value">{selectedCompany.type || '—'}</div>
-                        </div>
-                        <div className="info-item">
-                          <div className="label">Category</div>
-                          <div className="value">{selectedCompany.category || '—'}</div>
-                        </div>
-                        <div className="info-item">
-                          <div className="label">CTC (LPA)</div>
-                          <div className="value">{selectedCompany.ctc ?? '—'}</div>
+                          <div className="label">CTC</div>
+                          <div className="value">{formatInr(selectedCompany.ctc, 'p.a.')}</div>
                         </div>
                         <div className="info-item">
                           <div className="label">Stipend</div>
-                          <div className="value">{selectedCompany.stipend ?? '—'}</div>
+                          <div className="value">{formatInr(selectedCompany.stipend, 'p.m.')}</div>
                         </div>
                         <div className="info-item">
                           <div className="label">Eligible CGPA</div>
                           <div className="value">{selectedCompany.eligible_cgpa ?? '—'}</div>
                         </div>
                         <div className="info-item">
-                          <div className="label">Backlog Allowed</div>
-                          <div className="value">{selectedCompany.backlog_allowed ? 'Yes' : 'No'}</div>
+                          <div className="label">Backlog policy</div>
+                          <div className="value">{selectedCompany.backlog_allowed ? 'Allowed' : 'Not allowed'}</div>
                         </div>
                         <div className="info-item">
-                          <div className="label">Registration Deadline</div>
+                          <div className="label">Registration deadline</div>
                           <div className="value">{formatDate(selectedCompany.registration_deadline)}</div>
                         </div>
                         <div className="info-item">
-                          <div className="label">Date of Offer</div>
+                          <div className="label">Offer date</div>
                           <div className="value">{formatDate(selectedCompany.offer_date)}</div>
                         </div>
+                        {stats.reported > 0 && <div className="info-item">
+                          <div className="label">Reported CSE offers</div>
+                          <div className="value">{stats.reported}</div>
+                        </div>}
+                          </>
+                        )}
                       </div>
 
-                      <h4 style={{ marginTop: 16, marginBottom: 8 }}>Hiring Statistics</h4>
+                      <h3 className="detail-section-title">{isAggregateOnly ? 'Reported aggregate' : 'Hiring footprint'}</h3>
                       <div className="hiring-stats">
                         <div className="hiring-stat">
-                          <div className="count">{stats.total}</div>
-                          <div className="label">Total Hired</div>
+                          <div className="count">{isAggregateOnly ? stats.reported : stats.total}</div>
+                          <div className="label">{isAggregateOnly ? 'Reported offers' : 'Linked student offers'}</div>
                         </div>
-                        <div className="hiring-stat">
+                        {!isAggregateOnly && <div className="hiring-stat">
                           <div className="count">{stats.CSE}</div>
                           <div className="label">CSE</div>
-                        </div>
-                        <div className="hiring-stat">
+                        </div>}
+                        {!isAggregateOnly && <div className="hiring-stat">
                           <div className="count">{stats.ECE}</div>
                           <div className="label">ECE</div>
-                        </div>
-                        <div className="hiring-stat">
+                        </div>}
+                        {!isAggregateOnly && <div className="hiring-stat">
                           <div className="count">{stats.CB}</div>
                           <div className="label">CB</div>
-                        </div>
+                        </div>}
                       </div>
 
-                      {stats.students.length > 0 && (
+                      {!isAggregateOnly && stats.students.length > 0 && (
                         <>
-                          <h4 style={{ marginTop: 16, marginBottom: 8 }}>Hired Students</h4>
+                          <h3 className="detail-section-title">Hired students</h3>
                           <div className="hired-students-list">
-                            <table className="table">
-                              <thead>
-                                <tr>
-                                  <th>Roll</th>
-                                  <th>Name</th>
-                                  <th>Program</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {stats.students.map((st, idx) => (
-                                  <tr key={idx}>
-                                    <td>{st.roll}</td>
-                                    <td>{st.name}</td>
-                                    <td>{st.program}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
+                            {stats.students.map((student, index) => (
+                              <div key={`${student.roll}-${index}`}><span className="student-avatar">{initialsFor(student.name)}</span><div><strong>{student.name}</strong><small>{student.roll} · {student.program}</small></div></div>
+                            ))}
                           </div>
                         </>
                       )}
@@ -1657,95 +2117,93 @@ const App = () => {
                   );
                 })()}
               </Modal>
-            </div>
+            </main>
           )}
         />
 
         <Route
           path="/students"
           element={(
-            <div className="container section-page students-page">
-              <div className="section-hero students-hero">
-                <div className="section-hero-copy">
-                  <div className="badge section-badge">Students</div>
-                  <h1>Student outcomes for {activeBatch.label}</h1>
-                  <p className="subtext section-hero-subtext">
-                    Filter the roster by branch, status, offer type, and program in a cleaner view designed for scanning placement progress.
-                  </p>
+            isAggregateOnly ? (
+              <main className="container section-page students-page">
+                <section className="directory-hero">
+                  <div className="directory-hero-copy">
+                    <span className="eyebrow">Aggregate archive · {activeBatch.label}</span>
+                    <h1>Student-level records were not included.</h1>
+                    <p>This historical source contains M.Tech CSE company names, roles, and aggregate offer counts only. No student names, roll numbers, placement rates, or compensation figures are inferred.</p>
+                    <div className="hero-actions"><Link className="primary-link" to="/companies">View reported offers</Link><Link className="text-link" to="/">Return to overview</Link></div>
+                  </div>
+                </section>
+              </main>
+            ) : (
+              <main className="container section-page students-page">
+              <section className="directory-hero student-directory-hero">
+                <div className="directory-hero-copy">
+                  <span className="eyebrow">Student outcomes · {activeBatch.label}</span>
+                  <h1>A living directory of progress, offers, and possibility.</h1>
+                  <p>Read the cohort by status, discipline, and offer journey without reducing people to spreadsheet rows.</p>
                 </div>
-                <div className="section-summary-grid">
-                  <div className="section-summary-card">
-                    <div className="section-summary-label">Visible Students</div>
-                    <div className="section-summary-value">{studentOverview.total}</div>
-                    <div className="section-summary-footnote">
-                      {studentOverview.excluded
-                        ? `${studentOverview.excluded} marked Ineligible or Not Sitting`
-                        : 'All visible students count toward placement stats'}
-                    </div>
-                  </div>
-                  <div className="section-summary-card">
-                    <div className="section-summary-label">Placed</div>
-                    <div className="section-summary-value">{studentOverview.placed}</div>
-                    <div className="section-summary-footnote">{studentOverview.unplaced} eligible & sitting still unplaced</div>
-                  </div>
-                  <div className="section-summary-card">
-                    <div className="section-summary-label">Programs Visible</div>
-                    <div className="section-summary-value">{studentOverview.programs}</div>
-                    <div className="section-summary-footnote">{studentOverview.internships} with internship tracks</div>
-                  </div>
+                <div className="student-hero-outcome">
+                  <DonutChart value={studentOverview.placed} total={studentOverview.eligible} label="Visible placement rate" detail={`${studentOverview.placed} placed`} />
                 </div>
-              </div>
+              </section>
 
-              <div className="section-header section-page-header">
-                <div>
-                  <h3>Students · {activeBatch.label}</h3>
-                  <span className="subtext">Sharper status cues, richer chips, and a roster table that is easier to read in both themes.</span>
-                </div>
-                {isAdmin && (
-                  <button onClick={() => { setEditStudent(null); setShowStudentModal(true); }}>Add Student</button>
-                )}
-              </div>
+              <MobileDisclosure summary="Selection overview" className="insight-disclosure" contentClassName="student-status-overview">
+                <div className="student-status-copy"><span className="eyebrow">Current selection</span><h2>{studentOverview.total} students across {studentOverview.programs} programs.</h2><p>{studentOverview.internships} students have an internship or combined track in the visible result set.</p></div>
+                <SegmentedBar label="Placement status" items={studentVisuals.statuses} />
+                <HorizontalBars items={studentVisuals.programs} />
+              </MobileDisclosure>
 
-              <div className="toolbar section-toolbar">
+              <section className="directory-toolbar student-toolbar">
                 <input
                   type="text"
                   className="search-input"
-                  placeholder="Search name or roll..."
+                  placeholder="Search by student name or roll number"
                   value={studentSearch}
                   onChange={(e) => setStudentSearch(e.target.value)}
                 />
-                <div className="filter-group">
-                  <label>Branch group:</label>
-                  <select value={studentFilters.branchGroup} onChange={(e) => setStudentFilters((f) => ({ ...f, branchGroup: e.target.value }))}>
-                    <option value="">All</option>
-                    <option value="CSE">CSE</option>
-                    <option value="ECE">ECE</option>
-                    <option value="CB">CB</option>
-                  </select>
-                </div>
-                <div className="filter-group">
-                  <label>Status:</label>
-                  <select value={studentFilters.status} onChange={(e) => setStudentFilters((f) => ({ ...f, status: e.target.value }))}>
-                    <option value="">All</option>
-                    {STUDENT_STATUS_OPTIONS.map((status) => (
-                      <option key={status} value={status}>{status}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="filter-group">
-                  <label>Offer:</label>
-                  <select value={studentFilters.offerType} onChange={(e) => setStudentFilters((f) => ({ ...f, offerType: e.target.value }))}>
-                    <option value="">All</option>
-                    <option value="Intern">Intern</option>
-                    <option value="FTE">FTE</option>
-                    <option value="Intern+FTE">Intern+FTE</option>
-                  </select>
-                </div>
-              </div>
+                <MobileDisclosure
+                  summary={`Filters & sort${[studentFilters.branchGroup, studentFilters.status, studentFilters.offerType, ...studentFilters.programs].filter(Boolean).length ? ` · ${[studentFilters.branchGroup, studentFilters.status, studentFilters.offerType, ...studentFilters.programs].filter(Boolean).length} active` : ''}`}
+                  className="toolbar-disclosure"
+                  contentClassName="toolbar-controls"
+                >
+                  <div className="filter-group">
+                    <label>Branch group</label>
+                    <select value={studentFilters.branchGroup} onChange={(e) => setStudentFilters((f) => ({ ...f, branchGroup: e.target.value }))}>
+                      <option value="">All</option>
+                      <option value="CSE">CSE</option>
+                      <option value="ECE">ECE</option>
+                      <option value="CB">CB</option>
+                    </select>
+                  </div>
+                  <div className="filter-group">
+                    <label>Status</label>
+                    <select value={studentFilters.status} onChange={(e) => setStudentFilters((f) => ({ ...f, status: e.target.value }))}>
+                      <option value="">All</option>
+                      {STUDENT_STATUS_OPTIONS.map((status) => (
+                        <option key={status} value={status}>{status}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="filter-group">
+                    <label>Offer type</label>
+                    <select value={studentFilters.offerType} onChange={(e) => setStudentFilters((f) => ({ ...f, offerType: e.target.value }))}>
+                      <option value="">All</option>
+                      {OFFER_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+                    </select>
+                  </div>
+                  <label className="sort-control">Sort by
+                    <select value={studentSort.field} onChange={(event) => setStudentSort({ field: event.target.value, asc: true })}>
+                      <option value="roll_number">Roll number</option><option value="name">Name</option><option value="ctc">Highest CTC</option><option value="stipend">Highest stipend</option><option value="offer_date">Latest offer</option>
+                    </select>
+                  </label>
+                  {isAdmin && <button onClick={() => { setEditStudent(null); setShowStudentModal(true); }}>Add student</button>}
+                </MobileDisclosure>
+              </section>
 
               {availablePrograms.length > 0 && (
-                <div className="toolbar toolbar-programs section-toolbar">
-                  <span className="subtext">Programs</span>
+                <MobileDisclosure summary={`Programs${studentFilters.programs.length ? ` · ${studentFilters.programs.length} selected` : ''}`} className="program-disclosure" contentClassName="program-filter-strip">
+                  <span className="eyebrow">Programs</span>
                   <div className="filter-chip-row">
                     {availablePrograms.map((program) => {
                       const isSelected = studentFilters.programs.includes(program);
@@ -1766,66 +2224,39 @@ const App = () => {
                       </button>
                     )}
                   </div>
-                </div>
+                </MobileDisclosure>
               )}
 
-              <div className="card table-shell table-shell-students" style={{ overflowX: 'auto' }}>
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th className={`sortable ${studentSort.field === 'roll_number' ? 'sorted' : ''}`} onClick={() => toggleSort(setStudentSort, studentSort, 'roll_number')}>
-                        Roll <SortIcon field="roll_number" current={studentSort} />
-                      </th>
-                      <th className={`sortable ${studentSort.field === 'name' ? 'sorted' : ''}`} onClick={() => toggleSort(setStudentSort, studentSort, 'name')}>
-                        Name <SortIcon field="name" current={studentSort} />
-                      </th>
-                      <th>Program</th>
-                      <th>Status</th>
-                      <th>Companies</th>
-                      <th>Offer Types</th>
-                      <th className={`sortable ${studentSort.field === 'ctc' ? 'sorted' : ''}`} onClick={() => toggleSort(setStudentSort, studentSort, 'ctc')}>
-                        CTC <SortIcon field="ctc" current={studentSort} />
-                      </th>
-                      <th className={`sortable ${studentSort.field === 'stipend' ? 'sorted' : ''}`} onClick={() => toggleSort(setStudentSort, studentSort, 'stipend')}>
-                        Stipend <SortIcon field="stipend" current={studentSort} />
-                      </th>
-                      <th className={`sortable ${studentSort.field === 'offer_date' ? 'sorted' : ''}`} onClick={() => toggleSort(setStudentSort, studentSort, 'offer_date')}>
-                        Date <SortIcon field="offer_date" current={studentSort} />
-                      </th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredStudents.map((s) => {
-                      const isPlaced = s.placement_status === 'Placed';
-                      const offerDates = s.offers?.length
-                        ? (s.offers.map((o) => formatDate(o.offer_date || o.company_offer_date)).filter((x) => x !== '—').join(', ') || '—')
-                        : formatDate(s.offer_date ?? s.company_offer_date);
-                      return (
-                        <tr key={s.id} className={isPlaced ? 'student-row student-row-placed' : 'student-row student-row-unplaced'}>
-                          <td>{s.roll_number}</td>
-                          <td className="table-cell-strong">{s.name}</td>
-                          <td><span className="chip table-chip table-chip-program">{s.program}</span></td>
-                          <td><span className={`chip table-chip ${isPlaced ? 'table-chip-status-placed' : 'table-chip-status-unplaced'}`}>{s.placement_status}</span></td>
-                          <td>{(s.offers?.length ? s.offers.map((o) => o.company_name).join(', ') : s.company_name) || '—'}</td>
-                          <td>{(s.offers?.length ? s.offers.map((o) => o.offer_type || '—').join(', ') : s.offer_type) || '—'}</td>
-                          <td>{s.offers?.length ? (s.offers.map((o) => o.ctc ?? o.company_ctc).filter(Boolean).join(', ') || '—') : (s.ctc ?? s.company_ctc ?? '—')}</td>
-                          <td>{s.offers?.length ? (s.offers.map((o) => o.stipend ?? o.company_stipend).filter(Boolean).join(', ') || '—') : (s.stipend ?? s.company_stipend ?? '—')}</td>
-                          <td>{offerDates}</td>
-                          <td>
-                            {isAdmin && (
-                              <div className="flex-row">
-                                <button className="secondary" onClick={() => { setEditStudent(s); setShowStudentModal(true); }}>Edit</button>
-                                <button className="secondary" onClick={() => deleteStudentAction(s.id)}>Delete</button>
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+              <div className="directory-result-heading student-result-heading">
+                <div><span className="eyebrow">Student directory</span><h2>{filteredStudents.length} visible records</h2></div>
               </div>
+
+              <section className="student-directory-list">
+                {filteredStudents.map((student) => {
+                  const offers = getStudentOffers(student);
+                  const highestCtc = Math.max(...offers.map((offer) => Number(offer.ctc ?? offer.company_ctc) || 0), 0);
+                  const companyNames = offers.map((offer) => offer.company_name).filter(Boolean);
+                  const statusClass = String(student.placement_status || 'unknown').toLowerCase().replace(/\s+/g, '-');
+                  return (
+                    <article key={student.id} className={`student-profile-row student-profile-${statusClass}`}>
+                      <button type="button" className="student-profile-main" onClick={() => setSelectedStudent(student)}>
+                        <span className="student-avatar">{initialsFor(student.name)}</span>
+                        <span className="student-identity"><strong>{student.name}</strong><small>{student.roll_number} · {student.program}</small></span>
+                        <StatusPill status={student.placement_status} />
+                      </button>
+                      <div className="student-offer-summary">
+                        {companyNames.length ? (
+                          <><span className="offer-company-stack">{companyNames.slice(0, 2).join(' · ')}{companyNames.length > 2 ? ` +${companyNames.length - 2}` : ''}</span><small>{offers.map((offer) => offer.offer_type).filter(Boolean).join(' · ')}</small></>
+                        ) : <span className="no-offer-copy">No recorded offer yet</span>}
+                      </div>
+                      <div className="student-compensation"><span>Best recorded CTC</span><strong>{formatInr(highestCtc || null, 'p.a.')}</strong></div>
+                      <button type="button" className="row-open-button" aria-label={`Open ${student.name}`} onClick={() => setSelectedStudent(student)}>→</button>
+                      {isAdmin && <div className="row-admin-actions"><button className="secondary" onClick={() => { setEditStudent(student); setShowStudentModal(true); }}>Edit</button><button className="danger-button" onClick={() => deleteStudentAction(student.id)}>Delete</button></div>}
+                    </article>
+                  );
+                })}
+                {!filteredStudents.length && <div className="empty-directory-state"><h3>No student records found.</h3><p>Try widening the current search or filters.</p></div>}
+              </section>
 
               <Modal open={showStudentModal} onClose={() => setShowStudentModal(false)}>
                 <h3>{editStudent ? 'Edit Student' : 'Add Student'}</h3>
@@ -1836,81 +2267,228 @@ const App = () => {
                   onCancel={() => setShowStudentModal(false)}
                 />
               </Modal>
-            </div>
+
+              <Modal open={!!selectedStudent} onClose={() => setSelectedStudent(null)}>
+                {selectedStudent && (() => {
+                  const offers = getStudentOffers(selectedStudent);
+                  return (
+                    <div className="student-detail">
+                      <div className="detail-hero-row">
+                        <span className="student-avatar student-avatar-large">{initialsFor(selectedStudent.name)}</span>
+                        <div><span className="eyebrow">{selectedStudent.roll_number} · {selectedStudent.program}</span><h2>{selectedStudent.name}</h2><StatusPill status={selectedStudent.placement_status} /></div>
+                      </div>
+                      <div className="offer-timeline">
+                        {offers.length ? offers.map((offer, index) => (
+                          <article key={offer.id || index}>
+                            <span className="timeline-marker">{String(index + 1).padStart(2, '0')}</span>
+                            <div><span className="eyebrow">{offer.offer_type || 'Offer'} · {formatDate(offer.offer_date)}</span><h3>{offer.company_name || selectedStudent.company_name || 'Company not recorded'}</h3><p>{formatInr(offer.ctc ?? offer.company_ctc, 'p.a.')} · {formatInr(offer.stipend ?? offer.company_stipend, 'p.m.')}</p></div>
+                          </article>
+                        )) : <div className="empty-detail-state">No offer journey has been recorded for this student.</div>}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </Modal>
+              </main>
+            )
           )}
         />
 
         <Route
           path="/admin"
-          element={(
-            <div className="container">
-              <div className="card" style={{ maxWidth: 520, margin: '32px auto' }}>
-                <h3>Admin Login</h3>
-                <p className="subtext">Use institute credentials to manage the database.</p>
-                <LoginForm onLogin={handleLogin} />
-                {error && <p className="error-text">{error}</p>}
-              </div>
-            </div>
-          )}
+          element={isAdmin ? <ViewerAccessSettings authHeaders={authHeaders} /> : <Navigate to="/" replace />}
         />
       </Routes>
     </>
   );
 };
 
-const LoginScreen = ({ assetBase, onSuccess, onError, error, themeMode, onToggleTheme }) => (
-  <div
-    className="login-screen"
-    style={{
-      minHeight: '100vh',
-      display: 'grid',
-      placeItems: 'center',
-      background: `linear-gradient(90deg, rgba(63,173,168,0.35), rgba(255,255,255,0.9)), url(${assetBase}institute18-3.jpg)`,
-      backgroundSize: 'cover',
-      backgroundPosition: 'center',
-      padding: 24,
-    }}
-  >
-    <div className="card" style={{ maxWidth: 420, width: '100%', textAlign: 'center' }}>
-      <div className="login-theme-toggle-row">
-        <ThemeToggle themeMode={themeMode} onToggle={onToggleTheme} compact />
-      </div>
-      <div style={{ marginBottom: 16 }}>
-        <img src={`${assetBase}iiitd_logo.png`} alt="IIIT Delhi" style={{ maxHeight: 72, width: 'auto' }} />
-      </div>
-      <h2 style={{ margin: '4px 0 8px' }}>Placement Tracker</h2>
-      <p className="subtext" style={{ marginBottom: 16 }}>Sign in with your iiitd.ac.in email to continue.</p>
-      {error && <div className="error-text" style={{ marginBottom: 12 }}>{error}</div>}
-      <div style={{ display: 'grid', placeItems: 'center' }}>
-        <GoogleLogin onSuccess={onSuccess} onError={onError} useOneTap={false} />
-      </div>
-    </div>
-  </div>
-);
-
-const LoginForm = ({ onLogin }) => {
-  const [email, setEmail] = useState('');
+const LoginScreen = ({ assetBase, onSuccess, onError, onViewerLogin, error, pending, themeMode, onToggleTheme }) => {
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        onLogin(email, password);
-      }}
-    >
-      <div>
-        <label>Email</label>
-        <input value={email} onChange={(e) => setEmail(e.target.value)} />
+    <main className="landing-page">
+    <nav className="landing-nav">
+      <a className="landing-brand" href="#top" aria-label="Placement Atlas home">
+        <img src={`${assetBase}iiitd_logo.png`} alt="IIIT Delhi" />
+        <span><strong>Placement Atlas</strong><small>Community dashboard</small></span>
+      </a>
+      <div className="landing-nav-actions">
+        <span className="unofficial-pill">Unofficial side project</span>
+        <ThemeToggle themeMode={themeMode} onToggle={onToggleTheme} compact />
       </div>
-      <div>
-        <label>Password</label>
-        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+    </nav>
+
+    <section id="top" className="landing-hero">
+      <div className="landing-hero-copy">
+        <span className="eyebrow">Placement information, thoughtfully organised</span>
+        <h1>A clearer view of the IIIT Delhi placement journey.</h1>
+        <p>
+          Placement Atlas brings cohort outcomes, recruiter records, compensation context,
+          and student offer journeys into one searchable, student-built reference.
+        </p>
+        <div className="landing-principles" aria-label="Access and privacy summary">
+          <span><i>01</i> Restricted to IIIT Delhi students</span>
+          <span><i>02</i> Verified with Google or viewer credentials</span>
+          <span><i>03</i> Built for internal, responsible use</span>
+        </div>
       </div>
-      <div className="flex-row" style={{ justifyContent: 'flex-end', marginTop: 8 }}>
-        <button type="submit">Login</button>
+
+      <aside className="access-card" aria-labelledby="access-heading">
+        <div className="access-card-image" style={{ backgroundImage: `url(${assetBase}institute18-3.jpg)` }}>
+          <span>Community access</span>
+        </div>
+        <div className="access-card-body">
+          <span className="eyebrow">Verified access</span>
+          <h2 id="access-heading">Continue with IIITD Google</h2>
+          <p>Use your <strong>@iiitd.ac.in</strong> account to view the placement data.</p>
+          {error && <div className="error-text access-error" role="alert">{error}</div>}
+          <div className={pending ? 'google-login-wrap is-pending' : 'google-login-wrap'}>
+            <GoogleLogin
+              onSuccess={onSuccess}
+              onError={onError}
+              useOneTap={false}
+              auto_select={false}
+              button_auto_select={false}
+              use_fedcm_for_button={false}
+              hd="iiitd.ac.in"
+              ux_mode="popup"
+              text="signin_with"
+            />
+          </div>
+          <div className="access-divider"><span>or use viewer access</span></div>
+          <form
+            className="viewer-login-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              onViewerLogin({ username, password });
+            }}
+          >
+            <p>Contact the developer for a viewer username and password.</p>
+            <label>
+              Username
+              <input
+                type="text"
+                autoComplete="username"
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                disabled={pending}
+                required
+              />
+            </label>
+            <label>
+              Password
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                disabled={pending}
+                required
+              />
+            </label>
+            <button type="submit" disabled={pending}>{pending ? 'Verifying...' : 'Continue as viewer'}</button>
+          </form>
+          {pending && <span className="verification-status">Verifying access...</span>}
+          <div className="privacy-note">
+            <strong>Viewer access is read-only and cannot grant admin permissions.</strong>
+            <span>Google email addresses are checked only for eligibility and are not stored.</span>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <section className="landing-about" aria-labelledby="about-heading">
+      <div className="landing-section-heading">
+        <span className="eyebrow">What is inside</span>
+        <h2 id="about-heading">From scattered records to useful context.</h2>
+        <p>The underlying information remains private until your institute account is verified.</p>
       </div>
-    </form>
+      <div className="landing-feature-grid">
+        <article><span>01</span><h3>Cohort overview</h3><p>Understand placement progress and offer composition across batches and programs.</p></article>
+        <article><span>02</span><h3>Company directory</h3><p>Explore recruiters, roles, eligibility, compensation, and recorded hiring footprints.</p></article>
+        <article><span>03</span><h3>Student outcomes</h3><p>Review verified internal records through searchable, structured offer journeys.</p></article>
+      </div>
+    </section>
+
+    <footer className="landing-footer">
+      <p><strong>Important:</strong> Placement Atlas is an unofficial student side project. It is not operated by, endorsed by, or a substitute for the IIIT Delhi Placement Office.</p>
+      <span>Use the information responsibly and report genuine discrepancies to yash25091@iiitd.ac.in.</span>
+    </footer>
+    </main>
+  );
+};
+
+const ViewerAccessSettings = ({ authHeaders }) => {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    api.get('/admin/viewer-access', authHeaders)
+      .then((response) => {
+        if (active) setUsername(response.data.username || '');
+      })
+      .catch((err) => {
+        if (active) setError(err.response?.data?.message || 'Viewer access settings could not be loaded.');
+      });
+    return () => { active = false; };
+  }, [authHeaders]);
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setMessage('');
+    setError('');
+
+    if (password !== confirmPassword) {
+      setError('The passwords do not match.');
+      return;
+    }
+
+    setPending(true);
+    try {
+      const response = await api.put('/admin/viewer-access', { username, password }, authHeaders);
+      setUsername(response.data.username);
+      setPassword('');
+      setConfirmPassword('');
+      setMessage('Viewer credentials updated. Existing viewer sessions remain valid until they expire.');
+    } catch (err) {
+      setError(err.response?.data?.message || 'Viewer access settings could not be updated.');
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <main className="container section-page admin-settings-page">
+      <div className="card admin-settings-card">
+        <span className="eyebrow">Admin settings</span>
+        <h2>Viewer access</h2>
+        <p className="subtext">Change the shared read-only login shown on the landing screen. These credentials cannot create an admin session.</p>
+        <form onSubmit={submit}>
+          <label>
+            Viewer username
+            <input type="text" autoComplete="off" value={username} onChange={(event) => setUsername(event.target.value)} required />
+          </label>
+          <label>
+            New password
+            <input type="password" autoComplete="new-password" minLength={12} value={password} onChange={(event) => setPassword(event.target.value)} required />
+          </label>
+          <label>
+            Confirm new password
+            <input type="password" autoComplete="new-password" minLength={12} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required />
+          </label>
+          <button type="submit" disabled={pending}>{pending ? 'Updating...' : 'Update viewer credentials'}</button>
+        </form>
+        {message && <p className="success-text" role="status">{message}</p>}
+        {error && <p className="error-text" role="alert">{error}</p>}
+      </div>
+    </main>
   );
 };
 
