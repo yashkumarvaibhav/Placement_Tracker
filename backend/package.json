@@ -6,14 +6,19 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
+    "import:historical-mtech-cse": "node scripts/import-historical-mtech-cse.js",
+    "import:historical-placement-details": "node scripts/import-historical-placement-details.js",
+    "export:btech-2026-differences": "node scripts/export-btech-2026-differences.js",
+    "import:btech-2027-summer": "node scripts/import-btech-2027-summer-internships.js",
     "import:batches": "node scripts/import-batches.js",
     "import:btech-latest": "node scripts/import-btech-latest-placements.js"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.78.0",
+    "argon2": "^0.44.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^4.18.2",
+    "google-auth-library": "^10.7.0",
     "pg": "^8.11.5",
     "xlsx": "^0.18.5"
   },
