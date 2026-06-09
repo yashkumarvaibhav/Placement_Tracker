@@ -1,53 +1,32 @@
-# Import existing SQLite data into Supabase Postgres
+# Import existing SQLite data into local PostgreSQL
 
-You only need your current SQLite file (e.g., `data.sqlite`) and the Supabase connection string.
+The production PostgreSQL database runs in the `placement-tracker-postgres` Docker container and listens only on `127.0.0.1:5433`.
 
-## 1) Export CSVs from SQLite (runs locally)
+## Export from SQLite
+
+Export the tables in dependency order: `companies`, `students`, then `offers`.
+
 ```bash
-# companies
-sqlite3 data.sqlite <<'SQL'
-.headers on
-.mode csv
-.output companies.csv
-SELECT * FROM companies;
-.output stdout
-SQL
-
-# students
-sqlite3 data.sqlite <<'SQL'
-.headers on
-.mode csv
-.output students.csv
-SELECT * FROM students;
-.output stdout
-SQL
-
-# offers
-sqlite3 data.sqlite <<'SQL'
-.headers on
-.mode csv
-.output offers.csv
-SELECT * FROM offers;
-.output stdout
-SQL
+sqlite3 -header -csv data.sqlite "SELECT * FROM companies;" > companies.csv
+sqlite3 -header -csv data.sqlite "SELECT * FROM students;" > students.csv
+sqlite3 -header -csv data.sqlite "SELECT * FROM offers;" > offers.csv
 ```
 
-## 2) Import into Supabase
-Pick one method.
+## Import into PostgreSQL
 
-### A) Supabase UI (easiest)
-1. In Supabase, go to **Table Editor** → open `companies` → **Import** → upload `companies.csv`.
-2. Repeat for `students` and then `offers` (this order preserves foreign keys).
+Copy the CSV files into the container and import them with `psql` after confirming their columns match the local schema.
 
-### B) Via `psql` from your machine
 ```bash
-psql "postgresql://postgres:<YOUR-PASSWORD>@db.bqldotdtsodmfmnxwavl.supabase.co:5432/postgres?sslmode=require" \
-  -c "\\copy companies FROM 'companies.csv' CSV HEADER" \
-  -c "\\copy students FROM 'students.csv' CSV HEADER" \
-  -c "\\copy offers FROM 'offers.csv' CSV HEADER"
+docker cp companies.csv placement-tracker-postgres:/tmp/companies.csv
+docker cp students.csv placement-tracker-postgres:/tmp/students.csv
+docker cp offers.csv placement-tracker-postgres:/tmp/offers.csv
+
+docker exec placement-tracker-postgres psql -U placement_tracker -d placement_tracker \
+  -c "\\copy companies FROM '/tmp/companies.csv' WITH (FORMAT csv, HEADER true)"
+docker exec placement-tracker-postgres psql -U placement_tracker -d placement_tracker \
+  -c "\\copy students FROM '/tmp/students.csv' WITH (FORMAT csv, HEADER true)"
+docker exec placement-tracker-postgres psql -U placement_tracker -d placement_tracker \
+  -c "\\copy offers FROM '/tmp/offers.csv' WITH (FORMAT csv, HEADER true)"
 ```
 
-## Notes
-- Do **not** upload the SQLite file to Render; data lives in Supabase.
-- Import order matters: companies → students → offers.
-- If your column order differs from Supabase tables, adjust the `SELECT` in the export to match the Postgres schema.
+Take a database backup before importing into a populated production database.
