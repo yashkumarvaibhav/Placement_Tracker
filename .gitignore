@@ -1,7 +1,18 @@
 node_modules
+*.log
 backend/data.sqlite
 backend/.env
 frontend/dist
 *.sqlite
 !backend/seed.sqlite
 exports/
+backups/
+
+# Raw placement data / student PII exports — never commit
+*.csv
+*.xlsx
+*.ods
+*.tsv
+latest-placement.txt
+b.tech27.txt
+historical-placement-import-report.json
