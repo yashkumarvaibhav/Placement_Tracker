@@ -16,3 +16,6 @@ backups/
 latest-placement.txt
 b.tech27.txt
 historical-placement-import-report.json
+
+# Local working notes / audits — keep untracked
+documentation/

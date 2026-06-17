@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
-import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { GoogleLogin, googleLogout } from '@react-oauth/google';
 import {
   BATCHES,
@@ -64,6 +64,7 @@ const readBatchCache = (batchKey) => {
       stats: parsed.stats && typeof parsed.stats === 'object' ? parsed.stats : {},
       companies: Array.isArray(parsed.companies) ? parsed.companies : [],
       students: Array.isArray(parsed.students) ? parsed.students : [],
+      cachedAt: parsed.cachedAt || null,
     };
   } catch {
     return null;
@@ -154,6 +155,12 @@ const DonutChart = ({ value = 0, total = 0, label, detail, tone = 'accent' }) =>
   const radius = 52;
   const circumference = 2 * Math.PI * radius;
   const dash = (percentage / 100) * circumference;
+  const [drawn, setDrawn] = useState(false);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setDrawn(true));
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   return (
     <div className={`donut-chart donut-chart-${tone}`}>
@@ -164,7 +171,8 @@ const DonutChart = ({ value = 0, total = 0, label, detail, tone = 'accent' }) =>
           cx="66"
           cy="66"
           r={radius}
-          strokeDasharray={`${dash} ${circumference - dash}`}
+          strokeDasharray={circumference}
+          strokeDashoffset={drawn ? circumference - dash : circumference}
         />
       </svg>
       <div className="donut-center">
@@ -397,11 +405,71 @@ const buildProgramSummaries = (students, placementsOnly = false) => {
   };
 };
 
-const Modal = ({ open, onClose, children }) => {
+const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+const Modal = ({ open, onClose, label = 'Dialog', children }) => {
+  const dialogRef = useRef(null);
+  const lastFocused = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    lastFocused.current = document.activeElement;
+    const body = document.body;
+    const previousOverflow = body.style.overflow;
+    body.style.overflow = 'hidden';
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const focusable = dialogRef.current?.querySelectorAll(FOCUSABLE_SELECTOR);
+      if (!focusable || !focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    // Move focus into the dialog (close button is the first focusable element).
+    const focusTarget = dialogRef.current?.querySelector(FOCUSABLE_SELECTOR) || dialogRef.current;
+    focusTarget?.focus?.();
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      body.style.overflow = previousOverflow;
+      if (lastFocused.current && typeof lastFocused.current.focus === 'function') {
+        lastFocused.current.focus();
+      }
+    };
+  }, [open, onClose]);
+
   if (!open) return null;
+
   return (
     <div className="dialog-backdrop" onClick={onClose}>
-      <div className="dialog" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={label}
+        ref={dialogRef}
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button type="button" className="dialog-close" aria-label="Close dialog" onClick={onClose}>×</button>
         {children}
       </div>
     </div>
@@ -456,12 +524,12 @@ const CompanyForm = ({ initial = {}, onSubmit, onCancel }) => {
           </select>
         </div>
         <div>
-          <label>CTC (LPA)</label>
-          <input name="ctc" type="number" step="0.1" value={form.ctc ?? ''} onChange={handleChange} />
+          <label>CTC (₹ per annum)</label>
+          <input name="ctc" type="number" min="0" step="any" placeholder="e.g. 1200000" value={form.ctc ?? ''} onChange={handleChange} />
         </div>
         <div>
-          <label>Stipend</label>
-          <input name="stipend" type="number" step="0.1" value={form.stipend ?? ''} onChange={handleChange} />
+          <label>Stipend (₹ per month)</label>
+          <input name="stipend" type="number" min="0" step="any" placeholder="e.g. 50000" value={form.stipend ?? ''} onChange={handleChange} />
         </div>
         <div>
           <label>Category</label>
@@ -676,12 +744,12 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
                     </select>
                   </div>
                   <div>
-                    <label>CTC (LPA)</label>
-                    <input type="number" step="0.1" value={offer.ctc ?? ''} onChange={(e) => updateOfferField(idx, 'ctc', e.target.value)} />
+                    <label>CTC (₹ per annum)</label>
+                    <input type="number" min="0" step="any" placeholder="e.g. 1200000" value={offer.ctc ?? ''} onChange={(e) => updateOfferField(idx, 'ctc', e.target.value)} />
                   </div>
                   <div>
-                    <label>Stipend</label>
-                    <input type="number" step="0.1" value={offer.stipend ?? ''} onChange={(e) => updateOfferField(idx, 'stipend', e.target.value)} />
+                    <label>Stipend (₹ per month)</label>
+                    <input type="number" min="0" step="any" placeholder="e.g. 50000" value={offer.stipend ?? ''} onChange={(e) => updateOfferField(idx, 'stipend', e.target.value)} />
                   </div>
                   <div>
                     <label>Last Date of Registration</label>
@@ -715,6 +783,7 @@ const useAdminHeaders = (token) => useMemo(() => ({ headers: { Authorization: `B
 
 const App = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const [viewerToken, setViewerToken] = useState(readStoredViewerToken);
   const [token, setToken] = useState('');
   const [activeBatchKey, setActiveBatchKey] = useState(readInitialBatchKey);
@@ -746,6 +815,7 @@ const App = () => {
   const [companies, setCompanies] = useState(initialSnapshot?.companies || []);
   const [students, setStudents] = useState(initialSnapshot?.students || []);
   const [loading, setLoading] = useState(!initialSnapshot);
+  const [dataUpdatedAt, setDataUpdatedAt] = useState(initialSnapshot?.cachedAt || null);
   const [error, setError] = useState('');
   const [loginError, setLoginError] = useState('');
   const [authPending, setAuthPending] = useState(false);
@@ -754,10 +824,33 @@ const App = () => {
 
   const formatInr = (val, period = 'p.a.') => {
     if (val === null || val === undefined || Number.isNaN(Number(val))) return '—';
-    return `INR ${Number(val).toLocaleString('en-IN', { maximumFractionDigits: 2 })} ${period}`;
+    const number = Number(val);
+    // Annual figures read more naturally in LPA for a placement audience; monthly stays in rupees.
+    if (period === 'p.a.') {
+      const lpa = number / 100000;
+      return `₹${lpa.toLocaleString('en-IN', { maximumFractionDigits: 2 })} LPA`;
+    }
+    if (period === 'p.m.') {
+      return `₹${number.toLocaleString('en-IN', { maximumFractionDigits: 0 })}/mo`;
+    }
+    return `₹${number.toLocaleString('en-IN', { maximumFractionDigits: 2 })} ${period}`;
   };
 
   const formatPct = (val) => (val === null || val === undefined || Number.isNaN(Number(val)) ? '—' : `${val}%`);
+
+  const formatRelative = (val) => {
+    if (!val) return '';
+    const date = new Date(val);
+    if (Number.isNaN(date.getTime())) return '';
+    const diffMinutes = Math.round((Date.now() - date.getTime()) / 60000);
+    if (diffMinutes < 1) return 'just now';
+    if (diffMinutes < 60) return `${diffMinutes} min ago`;
+    const diffHours = Math.round(diffMinutes / 60);
+    if (diffHours < 24) return `${diffHours} hr${diffHours > 1 ? 's' : ''} ago`;
+    const diffDays = Math.round(diffHours / 24);
+    if (diffDays < 30) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+    return formatDate(val);
+  };
 
   const formatDate = (val) => {
     if (!val) return '—';
@@ -828,6 +921,7 @@ const App = () => {
     setStats({});
     setCompanies([]);
     setStudents([]);
+    setDataUpdatedAt(null);
   };
 
   const [showCompanyModal, setShowCompanyModal] = useState(false);
@@ -859,11 +953,13 @@ const App = () => {
       setStats(cachedSnapshot.stats);
       setCompanies(cachedSnapshot.companies);
       setStudents(cachedSnapshot.students);
+      setDataUpdatedAt(cachedSnapshot.cachedAt || null);
       setLoading(false);
     } else {
       setStats({});
       setCompanies([]);
       setStudents([]);
+      setDataUpdatedAt(null);
       setLoading(true);
     }
 
@@ -927,6 +1023,8 @@ const App = () => {
   useEffect(() => {
     localStorage.setItem('themeMode', themeMode);
     document.documentElement.setAttribute('data-theme', themeMode);
+    const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+    if (themeColorMeta) themeColorMeta.setAttribute('content', themeMode === 'dark' ? '#10191b' : '#ffffff');
   }, [themeMode]);
 
   useEffect(() => {
@@ -1319,18 +1417,9 @@ const App = () => {
     })),
   }), [availablePrograms, filteredStudents]);
 
-  // Toggle sort handler
-  const toggleSort = (setter, current, field) => {
-    if (current.field === field) {
-      setter({ field, asc: !current.asc });
-    } else {
-      setter({ field, asc: true });
-    }
-  };
-
   const SortIcon = ({ field, current }) => {
     const active = current.field === field;
-    return <span className="sort-icon">{active ? (current.asc ? '▲' : '▼') : '⇅'}</span>;
+    return <span className="sort-icon" aria-hidden="true">{active ? (current.asc ? '▲' : '▼') : '⇅'}</span>;
   };
 
   const refresh = (batchKey = activeBatch.key) => {
@@ -1372,6 +1461,7 @@ const App = () => {
         setCompanies(nextSnapshot.companies);
         setStudents(nextSnapshot.students);
         writeBatchCache(batchKey, nextSnapshot);
+        setDataUpdatedAt(new Date().toISOString());
         setError('');
         setLoading(false);
       } catch (err) {
@@ -1475,8 +1565,6 @@ const App = () => {
     );
   }
 
-  if (loading) return <div className="container">Loading...</div>;
-
   return (
     <>
       <header className={[
@@ -1528,6 +1616,21 @@ const App = () => {
         </div>
       </header>
 
+      {loading ? (
+        <main className="container loading-main" aria-busy="true">
+          <div className="skeleton-page" role="status" aria-label={`Loading ${activeBatch.label}`}>
+            <div className="skeleton skeleton-eyebrow" />
+            <div className="skeleton skeleton-title" />
+            <div className="skeleton-ledger">
+              {Array.from({ length: 4 }).map((_, index) => <div key={index} className="skeleton skeleton-tile" />)}
+            </div>
+            <div className="skeleton-cards">
+              {Array.from({ length: 6 }).map((_, index) => <div key={index} className="skeleton skeleton-card" />)}
+            </div>
+            {error && <p className="loading-note">{error}</p>}
+          </div>
+        </main>
+      ) : (
       <Routes>
         <Route
           path="/"
@@ -1559,6 +1662,7 @@ const App = () => {
                     {!isAggregateOnly && <Link className="text-link" to="/students">Browse student outcomes <span aria-hidden="true">→</span></Link>}
                   </div>
                   {error && <p className="hero-error">{error}</p>}
+                  {dataUpdatedAt && <p className="data-updated-note" title={`Data as of ${formatDate(dataUpdatedAt)}`}>Updated {formatRelative(dataUpdatedAt)}</p>}
                 </div>
                 <div className="hero-outcome-panel">
                   {isAggregateOnly ? (
@@ -1892,11 +1996,13 @@ const App = () => {
           path="/companies"
           element={(
             <main className="container section-page companies-page">
+              {error && <p className="page-alert" role="alert">{error}</p>}
               <section className="directory-hero">
                 <div className="directory-hero-copy">
                   <span className="eyebrow">Company index · {activeBatch.label}</span>
                   <h1>Recruiters, roles, and the opportunities they created.</h1>
                   <p>{isAggregateOnly ? 'Explore company roles and reported M.Tech CSE offer counts from the historical aggregate.' : 'Explore compensation, eligibility, offer type, and the actual branch footprint of every recorded company.'}</p>
+                  {!isAdmin && !isAggregateOnly && <p className="directory-scope-note">Showing companies with recorded hiring outcomes for this cohort. A company that visited but has no recorded offers yet may not appear here.</p>}
                 </div>
                 <div className="directory-hero-stats">
                   <MetricTile label="Visible companies" value={companyOverview.total} note={companyOverview.activeTypes} />
@@ -1920,8 +2026,9 @@ const App = () => {
 
               <section className={isAggregateOnly ? 'directory-toolbar aggregate-directory-toolbar' : 'directory-toolbar'}>
                 <input
-                  type="text"
+                  type="search"
                   className="search-input"
+                  aria-label="Search companies by name"
                   placeholder="Search companies by name"
                   value={companySearch}
                   onChange={(e) => setCompanySearch(e.target.value)}
@@ -1961,12 +2068,21 @@ const App = () => {
                       <option value="name">Company name</option><option value="ctc">Highest CTC</option><option value="stipend">Highest stipend</option><option value="totalHired">Most hires</option><option value="offer_date">Latest offer date</option>
                     </select>
                   </label>
+                  {(companySearch || Object.values(companyFilters).some(Boolean)) && <button type="button" className="secondary clear-filters-button" onClick={() => { setCompanySearch(''); setCompanyFilters({ type: '', category: '', branchGroup: '' }); }}>Clear filters</button>}
                   {isAdmin && <button onClick={() => { setEditCompany(null); setShowCompanyModal(true); }}>Add company</button>}
                 </MobileDisclosure>
               </section>
 
+              {(companyFilters.type || companyFilters.category || companyFilters.branchGroup) && (
+                <div className="applied-filter-row" aria-label="Active filters">
+                  {companyFilters.type && <button type="button" className="applied-chip" aria-label={`Remove filter ${companyFilters.type}`} onClick={() => setCompanyFilters((f) => ({ ...f, type: '' }))}>{companyFilters.type}<span aria-hidden="true">×</span></button>}
+                  {companyFilters.category && <button type="button" className="applied-chip" aria-label={`Remove category ${companyFilters.category}`} onClick={() => setCompanyFilters((f) => ({ ...f, category: '' }))}>Category {companyFilters.category}<span aria-hidden="true">×</span></button>}
+                  {companyFilters.branchGroup && <button type="button" className="applied-chip" aria-label={`Remove hiring branch ${companyFilters.branchGroup}`} onClick={() => setCompanyFilters((f) => ({ ...f, branchGroup: '' }))}>{companyFilters.branchGroup} hiring<span aria-hidden="true">×</span></button>}
+                </div>
+              )}
+
               <div className="directory-result-heading">
-                <div><span className="eyebrow">Opportunity catalogue</span><h2>{filteredCompanies.length} companies</h2></div>
+                <div><span className="eyebrow">Opportunity catalogue</span><h2>{filteredCompanies.length} companies</h2>{dataUpdatedAt && <span className="data-updated-note" title={`Data as of ${formatDate(dataUpdatedAt)}`}>Updated {formatRelative(dataUpdatedAt)}</span>}</div>
                 <button type="button" className="text-button" onClick={() => setCompanySort((current) => ({ ...current, asc: !current.asc }))}>{companySort.asc ? 'Ascending' : 'Descending'} <SortIcon field={companySort.field} current={companySort} /></button>
               </div>
 
@@ -2015,11 +2131,11 @@ const App = () => {
                     </article>
                   );
                 })}
-                {!filteredCompanies.length && <div className="empty-directory-state"><h3>No companies found.</h3><p>Try widening the current search or filters.</p></div>}
+                {!filteredCompanies.length && <div className="empty-directory-state"><h3>No companies found.</h3><p>Try widening the current search or filters.</p>{(companySearch || Object.values(companyFilters).some(Boolean)) && <button type="button" className="secondary" onClick={() => { setCompanySearch(''); setCompanyFilters({ type: '', category: '', branchGroup: '' }); }}>Clear filters</button>}</div>}
               </section>
 
               {/* Add/Edit Company Modal */}
-              <Modal open={showCompanyModal} onClose={() => setShowCompanyModal(false)}>
+              <Modal open={showCompanyModal} onClose={() => setShowCompanyModal(false)} label={editCompany ? 'Edit company' : 'Add company'}>
                 <h3>{editCompany ? 'Edit Company' : 'Add Company'}</h3>
                 <CompanyForm
                   initial={editCompany || {}}
@@ -2029,7 +2145,7 @@ const App = () => {
               </Modal>
 
               {/* Company Detail Modal */}
-              <Modal open={!!selectedCompany} onClose={() => setSelectedCompany(null)}>
+              <Modal open={!!selectedCompany} onClose={() => setSelectedCompany(null)} label={selectedCompany ? `${selectedCompany.name} details` : 'Company details'}>
                 {selectedCompany && (() => {
                   const stats = companyHiringStats[selectedCompany.id] || { total: 0, reported: 0, CSE: 0, ECE: 0, CB: 0, OTHER: 0, students: [] };
                   return (
@@ -2137,6 +2253,7 @@ const App = () => {
               </main>
             ) : (
               <main className="container section-page students-page">
+              {error && <p className="page-alert" role="alert">{error}</p>}
               <section className="directory-hero student-directory-hero">
                 <div className="directory-hero-copy">
                   <span className="eyebrow">Student outcomes · {activeBatch.label}</span>
@@ -2156,8 +2273,9 @@ const App = () => {
 
               <section className="directory-toolbar student-toolbar">
                 <input
-                  type="text"
+                  type="search"
                   className="search-input"
+                  aria-label="Search students by name or roll number"
                   placeholder="Search by student name or roll number"
                   value={studentSearch}
                   onChange={(e) => setStudentSearch(e.target.value)}
@@ -2193,10 +2311,11 @@ const App = () => {
                     </select>
                   </div>
                   <label className="sort-control">Sort by
-                    <select value={studentSort.field} onChange={(event) => setStudentSort({ field: event.target.value, asc: true })}>
+                    <select value={studentSort.field} onChange={(event) => { const field = event.target.value; setStudentSort({ field, asc: field === 'name' || field === 'roll_number' }); }}>
                       <option value="roll_number">Roll number</option><option value="name">Name</option><option value="ctc">Highest CTC</option><option value="stipend">Highest stipend</option><option value="offer_date">Latest offer</option>
                     </select>
                   </label>
+                  {(studentSearch || studentFilters.branchGroup || studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0) && <button type="button" className="secondary clear-filters-button" onClick={() => { setStudentSearch(''); setStudentFilters({ branchGroup: '', programs: [], status: '', offerType: '' }); }}>Clear filters</button>}
                   {isAdmin && <button onClick={() => { setEditStudent(null); setShowStudentModal(true); }}>Add student</button>}
                 </MobileDisclosure>
               </section>
@@ -2227,8 +2346,18 @@ const App = () => {
                 </MobileDisclosure>
               )}
 
+              {(studentFilters.branchGroup || studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0) && (
+                <div className="applied-filter-row" aria-label="Active filters">
+                  {studentFilters.branchGroup && <button type="button" className="applied-chip" aria-label={`Remove branch ${studentFilters.branchGroup}`} onClick={() => setStudentFilters((f) => ({ ...f, branchGroup: '' }))}>{studentFilters.branchGroup}<span aria-hidden="true">×</span></button>}
+                  {studentFilters.status && <button type="button" className="applied-chip" aria-label={`Remove status ${studentFilters.status}`} onClick={() => setStudentFilters((f) => ({ ...f, status: '' }))}>{studentFilters.status}<span aria-hidden="true">×</span></button>}
+                  {studentFilters.offerType && <button type="button" className="applied-chip" aria-label={`Remove offer type ${studentFilters.offerType}`} onClick={() => setStudentFilters((f) => ({ ...f, offerType: '' }))}>{studentFilters.offerType}<span aria-hidden="true">×</span></button>}
+                  {studentFilters.programs.map((program) => <button key={program} type="button" className="applied-chip" aria-label={`Remove program ${program}`} onClick={() => toggleProgramFilter(program)}>{program}<span aria-hidden="true">×</span></button>)}
+                </div>
+              )}
+
               <div className="directory-result-heading student-result-heading">
-                <div><span className="eyebrow">Student directory</span><h2>{filteredStudents.length} visible records</h2></div>
+                <div><span className="eyebrow">Student directory</span><h2>{filteredStudents.length} visible records</h2>{dataUpdatedAt && <span className="data-updated-note" title={`Data as of ${formatDate(dataUpdatedAt)}`}>Updated {formatRelative(dataUpdatedAt)}</span>}</div>
+                <button type="button" className="text-button" onClick={() => setStudentSort((current) => ({ ...current, asc: !current.asc }))}>{studentSort.asc ? 'Ascending' : 'Descending'} <SortIcon field={studentSort.field} current={studentSort} /></button>
               </div>
 
               <section className="student-directory-list">
@@ -2255,10 +2384,10 @@ const App = () => {
                     </article>
                   );
                 })}
-                {!filteredStudents.length && <div className="empty-directory-state"><h3>No student records found.</h3><p>Try widening the current search or filters.</p></div>}
+                {!filteredStudents.length && <div className="empty-directory-state"><h3>No student records found.</h3><p>Try widening the current search or filters.</p>{(studentSearch || studentFilters.branchGroup || studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0) && <button type="button" className="secondary" onClick={() => { setStudentSearch(''); setStudentFilters({ branchGroup: '', programs: [], status: '', offerType: '' }); }}>Clear filters</button>}</div>}
               </section>
 
-              <Modal open={showStudentModal} onClose={() => setShowStudentModal(false)}>
+              <Modal open={showStudentModal} onClose={() => setShowStudentModal(false)} label={editStudent ? 'Edit student' : 'Add student'}>
                 <h3>{editStudent ? 'Edit Student' : 'Add Student'}</h3>
                 <StudentForm
                   initial={editStudent || {}}
@@ -2268,7 +2397,7 @@ const App = () => {
                 />
               </Modal>
 
-              <Modal open={!!selectedStudent} onClose={() => setSelectedStudent(null)}>
+              <Modal open={!!selectedStudent} onClose={() => setSelectedStudent(null)} label={selectedStudent ? `${selectedStudent.name} details` : 'Student details'}>
                 {selectedStudent && (() => {
                   const offers = getStudentOffers(selectedStudent);
                   return (
@@ -2299,6 +2428,7 @@ const App = () => {
           element={isAdmin ? <ViewerAccessSettings authHeaders={authHeaders} /> : <Navigate to="/" replace />}
         />
       </Routes>
+      )}
     </>
   );
 };
