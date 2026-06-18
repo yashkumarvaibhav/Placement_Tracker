@@ -170,6 +170,7 @@ export const initDb = async () => {
       registration_open_date TEXT,
       offer_date TEXT,
       branches TEXT[],
+      roles JSONB,
       batch_key TEXT,
       degree TEXT,
       graduation_year INTEGER
@@ -197,6 +198,7 @@ export const initDb = async () => {
       student_id BIGINT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
       company_id BIGINT NOT NULL REFERENCES companies(id),
       offer_type TEXT,
+      role TEXT,
       ctc DOUBLE PRECISION,
       stipend DOUBLE PRECISION,
       registration_deadline TEXT,
@@ -217,6 +219,8 @@ export const initDb = async () => {
   await query('ALTER TABLE companies ADD COLUMN IF NOT EXISTS reported_offer_count INTEGER;');
   await query('ALTER TABLE companies ADD COLUMN IF NOT EXISTS registration_open_date TEXT;');
   await query('ALTER TABLE companies ADD COLUMN IF NOT EXISTS branches TEXT[];');
+  await query('ALTER TABLE companies ADD COLUMN IF NOT EXISTS roles JSONB;');
+  await query('ALTER TABLE offers ADD COLUMN IF NOT EXISTS role TEXT;');
   await query('ALTER TABLE companies DROP CONSTRAINT IF EXISTS companies_type_check;');
   await query(`ALTER TABLE companies ADD CONSTRAINT companies_type_check
     CHECK(type IN ('Intern','FTE','Intern+FTE','Summer Intern + FTE','Summer Intern + PPO','Summer Intern','Intern + PPO'));`);
@@ -311,8 +315,8 @@ export const getCompany = async (id) => {
 export const createCompany = async (payload) => {
   const batchData = normalizeBatchPayload(payload);
   const { rows } = await query(
-    `INSERT INTO companies (name, role, type, ctc, stipend, category, eligible_cgpa, backlog_allowed, registration_deadline, registration_open_date, offer_date, branches, batch_key, degree, graduation_year)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+    `INSERT INTO companies (name, role, type, ctc, stipend, category, eligible_cgpa, backlog_allowed, registration_deadline, registration_open_date, offer_date, branches, roles, batch_key, degree, graduation_year)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
      RETURNING *`,
     [
       payload.name,
@@ -327,6 +331,7 @@ export const createCompany = async (payload) => {
       payload.registration_open_date || null,
       payload.offer_date || null,
       Array.isArray(payload.branches) && payload.branches.length ? payload.branches : null,
+      Array.isArray(payload.roles) && payload.roles.length ? JSON.stringify(payload.roles) : null,
       batchData.batch_key,
       batchData.degree,
       batchData.graduation_year,
@@ -338,8 +343,8 @@ export const createCompany = async (payload) => {
 export const updateCompany = async (id, payload) => {
   const batchData = normalizeBatchPayload(payload);
   const { rows } = await query(
-    `UPDATE companies SET name=$1, role=$2, type=$3, ctc=$4, stipend=$5, category=$6, eligible_cgpa=$7, backlog_allowed=$8, registration_deadline=$9, registration_open_date=$10, offer_date=$11, branches=$12, batch_key=$13, degree=$14, graduation_year=$15
-     WHERE id=$16 RETURNING *`,
+    `UPDATE companies SET name=$1, role=$2, type=$3, ctc=$4, stipend=$5, category=$6, eligible_cgpa=$7, backlog_allowed=$8, registration_deadline=$9, registration_open_date=$10, offer_date=$11, branches=$12, roles=$13, batch_key=$14, degree=$15, graduation_year=$16
+     WHERE id=$17 RETURNING *`,
     [
       payload.name,
       payload.role || '',
@@ -353,6 +358,7 @@ export const updateCompany = async (id, payload) => {
       payload.registration_open_date || null,
       payload.offer_date || null,
       Array.isArray(payload.branches) && payload.branches.length ? payload.branches : null,
+      Array.isArray(payload.roles) && payload.roles.length ? JSON.stringify(payload.roles) : null,
       batchData.batch_key,
       batchData.degree,
       batchData.graduation_year,
@@ -431,12 +437,13 @@ const replaceOffers = async (studentId, offers = []) => {
   for (const offer of offers) {
     if (!offer.company_id) continue;
     await query(
-      `INSERT INTO offers (student_id, company_id, offer_type, ctc, stipend, registration_deadline, offer_date)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      `INSERT INTO offers (student_id, company_id, offer_type, role, ctc, stipend, registration_deadline, offer_date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [
         studentId,
         offer.company_id,
         offer.offer_type || null,
+        offer.role || null,
         offer.ctc ?? null,
         offer.stipend ?? null,
         offer.registration_deadline || null,
@@ -552,12 +559,13 @@ export const addOfferToStudent = async (studentId, offer) => {
   if (existing.rows.length) throw new Error('This student already has an offer from this company');
 
   await query(
-    `INSERT INTO offers (student_id, company_id, offer_type, ctc, stipend, registration_deadline, offer_date)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    `INSERT INTO offers (student_id, company_id, offer_type, role, ctc, stipend, registration_deadline, offer_date)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [
       studentId,
       offer.company_id,
       offer.offer_type || null,
+      offer.role || null,
       offer.ctc ?? null,
       offer.stipend ?? null,
       offer.registration_deadline || null,

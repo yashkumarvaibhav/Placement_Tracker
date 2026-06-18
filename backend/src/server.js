@@ -429,6 +429,7 @@ app.post('/api/offers', authMiddleware, async (req, res) => {
     const updated = await addOfferToStudent(studentId, {
       company_id: companyId,
       offer_type: req.body.offer_type || company.type || null,
+      role: req.body.role || company.role || null,
       ctc: req.body.ctc ?? company.ctc ?? null,
       stipend: req.body.stipend ?? company.stipend ?? null,
       registration_deadline: req.body.registration_deadline || company.registration_deadline || null,
