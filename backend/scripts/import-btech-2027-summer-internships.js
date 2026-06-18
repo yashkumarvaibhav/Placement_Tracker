@@ -81,7 +81,6 @@ const main = async () => {
     existing_offers_preserved: 0,
     stipends_filled: 0,
     companies_marked_aplus: 0,
-    students_marked_placed: 0,
     students_created_without_program: [],
   };
 
@@ -117,11 +116,13 @@ const main = async () => {
     for (const record of records) {
       let student = studentsByRoll.get(record.roll_number);
       if (!student) {
+        // A summer internship does not make a student "placed", so brand-new students
+        // sourced from this sheet are created as Unplaced (still placement-eligible).
         const { rows } = await client.query(
           `INSERT INTO students (
             roll_number, name, program, placement_status, company_id, offer_type, ctc, stipend,
             registration_deadline, offer_date, batch_key, degree, graduation_year
-          ) VALUES ($1, $2, 'OTHER', 'Placed', NULL, NULL, NULL, NULL, NULL, NULL, $3, $4, $5)
+          ) VALUES ($1, $2, 'OTHER', 'Unplaced', NULL, NULL, NULL, NULL, NULL, NULL, $3, $4, $5)
           RETURNING *`,
           [record.roll_number, record.name, batch.key, batch.degree, batch.graduationYear]
         );
@@ -199,10 +200,8 @@ const main = async () => {
         }
       }
 
-      if (student.placement_status !== 'Placed') {
-        await client.query("UPDATE students SET placement_status = 'Placed' WHERE id = $1", [student.id]);
-        report.students_marked_placed += 1;
-      }
+      // Intentionally leave placement_status untouched: a summer internship must not
+      // mark a student placed, and must not downgrade someone already placed elsewhere.
 
       if (!student.company_id) {
         await client.query(

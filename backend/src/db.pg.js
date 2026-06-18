@@ -10,6 +10,7 @@ import {
   isCombinedOfferType,
   isFullTimeOfferType,
   isInternshipOfferType,
+  isPlacementQualifyingOfferType,
 } from './offer-types.js';
 
 
@@ -165,7 +166,9 @@ export const initDb = async () => {
       eligible_cgpa DOUBLE PRECISION,
       backlog_allowed BOOLEAN DEFAULT false,
       registration_deadline TEXT,
+      registration_open_date TEXT,
       offer_date TEXT,
+      branches TEXT[],
       batch_key TEXT,
       degree TEXT,
       graduation_year INTEGER
@@ -211,6 +214,8 @@ export const initDb = async () => {
   await query('ALTER TABLE companies ADD COLUMN IF NOT EXISTS degree TEXT;');
   await query('ALTER TABLE companies ADD COLUMN IF NOT EXISTS graduation_year INTEGER;');
   await query('ALTER TABLE companies ADD COLUMN IF NOT EXISTS reported_offer_count INTEGER;');
+  await query('ALTER TABLE companies ADD COLUMN IF NOT EXISTS registration_open_date TEXT;');
+  await query('ALTER TABLE companies ADD COLUMN IF NOT EXISTS branches TEXT[];');
   await query('ALTER TABLE companies DROP CONSTRAINT IF EXISTS companies_type_check;');
   await query(`ALTER TABLE companies ADD CONSTRAINT companies_type_check
     CHECK(type IN ('Intern','FTE','Intern+FTE','Summer Intern + FTE','Summer Intern + PPO','Summer Intern','Intern + PPO'));`);
@@ -291,6 +296,12 @@ export const listCompanies = async (batchKey = DEFAULT_BATCH_KEY) => {
   return rows;
 };
 
+// Companies are cycle-scoped: a cycle is a graduation year spanning both degrees.
+export const listCompaniesByCycle = async (graduationYear) => {
+  const { rows } = await query('SELECT * FROM companies WHERE graduation_year = $1 ORDER BY name ASC', [graduationYear]);
+  return rows;
+};
+
 export const getCompany = async (id) => {
   const { rows } = await query('SELECT * FROM companies WHERE id = $1', [id]);
   return rows[0];
@@ -299,8 +310,8 @@ export const getCompany = async (id) => {
 export const createCompany = async (payload) => {
   const batchData = normalizeBatchPayload(payload);
   const { rows } = await query(
-    `INSERT INTO companies (name, role, type, ctc, stipend, category, eligible_cgpa, backlog_allowed, registration_deadline, offer_date, batch_key, degree, graduation_year)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    `INSERT INTO companies (name, role, type, ctc, stipend, category, eligible_cgpa, backlog_allowed, registration_deadline, registration_open_date, offer_date, branches, batch_key, degree, graduation_year)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
      RETURNING *`,
     [
       payload.name,
@@ -312,7 +323,9 @@ export const createCompany = async (payload) => {
       payload.eligible_cgpa ?? null,
       payload.backlog_allowed ? true : false,
       payload.registration_deadline || null,
+      payload.registration_open_date || null,
       payload.offer_date || null,
+      Array.isArray(payload.branches) && payload.branches.length ? payload.branches : null,
       batchData.batch_key,
       batchData.degree,
       batchData.graduation_year,
@@ -324,8 +337,8 @@ export const createCompany = async (payload) => {
 export const updateCompany = async (id, payload) => {
   const batchData = normalizeBatchPayload(payload);
   const { rows } = await query(
-    `UPDATE companies SET name=$1, role=$2, type=$3, ctc=$4, stipend=$5, category=$6, eligible_cgpa=$7, backlog_allowed=$8, registration_deadline=$9, offer_date=$10, batch_key=$11, degree=$12, graduation_year=$13
-     WHERE id=$14 RETURNING *`,
+    `UPDATE companies SET name=$1, role=$2, type=$3, ctc=$4, stipend=$5, category=$6, eligible_cgpa=$7, backlog_allowed=$8, registration_deadline=$9, registration_open_date=$10, offer_date=$11, branches=$12, batch_key=$13, degree=$14, graduation_year=$15
+     WHERE id=$16 RETURNING *`,
     [
       payload.name,
       payload.role || '',
@@ -336,7 +349,9 @@ export const updateCompany = async (id, payload) => {
       payload.eligible_cgpa ?? null,
       payload.backlog_allowed ? true : false,
       payload.registration_deadline || null,
+      payload.registration_open_date || null,
       payload.offer_date || null,
+      Array.isArray(payload.branches) && payload.branches.length ? payload.branches : null,
       batchData.batch_key,
       batchData.degree,
       batchData.graduation_year,
@@ -350,11 +365,15 @@ export const deleteCompany = async (id) => {
   await query('DELETE FROM companies WHERE id=$1', [id]);
 };
 
-const fetchStudentWithCompanies = async ({ studentId = null, batchKey = DEFAULT_BATCH_KEY } = {}) => {
+const fetchStudentWithCompanies = async ({ studentId = null, batchKey = DEFAULT_BATCH_KEY, graduationYear = null } = {}) => {
   const params = [];
   const whereParts = [];
 
-  if (batchKey) {
+  if (graduationYear !== null) {
+    // Cycle scope: all students of a graduation year, across both degrees.
+    params.push(graduationYear);
+    whereParts.push(`s.graduation_year = $${params.length}`);
+  } else if (batchKey) {
     params.push(getBatchConfig(batchKey).key);
     whereParts.push(`s.batch_key = $${params.length}`);
   }
@@ -399,6 +418,8 @@ const fetchStudentWithCompanies = async ({ studentId = null, batchKey = DEFAULT_
 
 export const listStudents = (batchKey = DEFAULT_BATCH_KEY) => fetchStudentWithCompanies({ batchKey });
 
+export const listStudentsByCycle = (graduationYear) => fetchStudentWithCompanies({ graduationYear, batchKey: null });
+
 export const getStudent = async (id) => {
   const students = await fetchStudentWithCompanies({ studentId: id, batchKey: null });
   return students[0];
@@ -424,10 +445,44 @@ const replaceOffers = async (studentId, offers = []) => {
   }
 };
 
-export const createStudent = async (payload) => {
+// Offers are decoupled from placement_status: a placed student keeps all offers, while a
+// non-placed student keeps only non-qualifying offers (e.g. a summer internship) as recorded
+// outcomes. Because the admin form doesn't manage offers for non-placed students, an
+// offer-less payload must not erase a stored summer internship — fall back to the student's
+// existing non-qualifying offers in that case.
+const resolveStudentOffers = async (id, payload, isPlaced) => {
+  if (isPlaced) return payload.offers || [];
+  const incoming = (payload.offers || []).filter(
+    (offer) => !isPlacementQualifyingOfferType(offer.offer_type)
+  );
+  if (incoming.length) return incoming;
+  if (id == null) return [];
+  const existing = await getStudent(id);
+  return (existing?.offers || []).filter(
+    (offer) => !isPlacementQualifyingOfferType(offer.offer_type)
+  );
+};
+
+// Resolves the offers to persist plus the denormalized "primary offer" columns on the student
+// row. For placed students these mirror the form's primary fields (unchanged); for non-placed
+// students they mirror a retained non-qualifying offer, if any.
+const buildStudentWrite = async (id, payload) => {
   const isPlaced = payload.placement_status === 'Placed';
-  const primaryCompany = isPlaced ? (payload.offers?.[0]?.company_id || payload.company_id || null) : null;
-  const primaryOfferType = isPlaced ? (payload.offers?.[0]?.offer_type || payload.offer_type || null) : null;
+  const offers = await resolveStudentOffers(id, payload, isPlaced);
+  const primary = offers[0] || null;
+  return {
+    offers,
+    company_id: isPlaced ? (payload.offers?.[0]?.company_id || payload.company_id || null) : (primary?.company_id || null),
+    offer_type: isPlaced ? (payload.offers?.[0]?.offer_type || payload.offer_type || null) : (primary?.offer_type || null),
+    ctc: isPlaced ? (payload.ctc ?? null) : (primary?.ctc ?? null),
+    stipend: isPlaced ? (payload.stipend ?? null) : (primary?.stipend ?? null),
+    registration_deadline: isPlaced ? (payload.registration_deadline || null) : (primary?.registration_deadline || null),
+    offer_date: isPlaced ? (payload.offer_date || null) : (primary?.offer_date || null),
+  };
+};
+
+export const createStudent = async (payload) => {
+  const write = await buildStudentWrite(null, payload);
   const batchData = normalizeBatchPayload(payload);
 
   const { rows } = await query(
@@ -439,12 +494,12 @@ export const createStudent = async (payload) => {
       payload.name,
       normalizeProgram(payload.program),
       payload.placement_status,
-      primaryCompany,
-      primaryOfferType,
-      isPlaced ? payload.ctc ?? null : null,
-      isPlaced ? payload.stipend ?? null : null,
-      isPlaced ? payload.registration_deadline || null : null,
-      isPlaced ? payload.offer_date || null : null,
+      write.company_id,
+      write.offer_type,
+      write.ctc,
+      write.stipend,
+      write.registration_deadline,
+      write.offer_date,
       batchData.batch_key,
       batchData.degree,
       batchData.graduation_year,
@@ -452,14 +507,12 @@ export const createStudent = async (payload) => {
   );
 
   const studentId = rows[0]?.id;
-  if (isPlaced && payload.offers?.length) await replaceOffers(studentId, payload.offers);
+  await replaceOffers(studentId, write.offers);
   return getStudent(studentId);
 };
 
 export const updateStudent = async (id, payload) => {
-  const isPlaced = payload.placement_status === 'Placed';
-  const primaryCompany = isPlaced ? (payload.offers?.[0]?.company_id || payload.company_id || null) : null;
-  const primaryOfferType = isPlaced ? (payload.offers?.[0]?.offer_type || payload.offer_type || null) : null;
+  const write = await buildStudentWrite(id, payload);
   const batchData = normalizeBatchPayload(payload);
 
   await query(
@@ -470,12 +523,12 @@ export const updateStudent = async (id, payload) => {
       payload.name,
       normalizeProgram(payload.program),
       payload.placement_status,
-      primaryCompany,
-      primaryOfferType,
-      isPlaced ? payload.ctc ?? null : null,
-      isPlaced ? payload.stipend ?? null : null,
-      isPlaced ? payload.registration_deadline || null : null,
-      isPlaced ? payload.offer_date || null : null,
+      write.company_id,
+      write.offer_type,
+      write.ctc,
+      write.stipend,
+      write.registration_deadline,
+      write.offer_date,
       batchData.batch_key,
       batchData.degree,
       batchData.graduation_year,
@@ -483,9 +536,50 @@ export const updateStudent = async (id, payload) => {
     ]
   );
 
-  const offerPayload = isPlaced ? (payload.offers || []) : [];
-  await replaceOffers(id, offerPayload);
+  await replaceOffers(id, write.offers);
   return getStudent(id);
+};
+
+// Attaches a single offer (e.g. added from a company's page) to a student and reconciles
+// placement_status per policy: a qualifying offer (FTE/PPO/winter Intern) marks the student
+// Placed; a summer-intern-only offer leaves their status unchanged. Never downgrades.
+export const addOfferToStudent = async (studentId, offer) => {
+  const existing = await query(
+    'SELECT 1 FROM offers WHERE student_id = $1 AND company_id = $2 LIMIT 1',
+    [studentId, offer.company_id]
+  );
+  if (existing.rows.length) throw new Error('This student already has an offer from this company');
+
+  await query(
+    `INSERT INTO offers (student_id, company_id, offer_type, ctc, stipend, registration_deadline, offer_date)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [
+      studentId,
+      offer.company_id,
+      offer.offer_type || null,
+      offer.ctc ?? null,
+      offer.stipend ?? null,
+      offer.registration_deadline || null,
+      offer.offer_date || null,
+    ]
+  );
+
+  const refreshed = await getStudent(studentId);
+  const offers = refreshed?.offers || [];
+  const qualifying = offers.find((o) => isPlacementQualifyingOfferType(o.offer_type));
+  if (qualifying && refreshed.placement_status !== 'Placed') {
+    await query(
+      `UPDATE students SET placement_status='Placed', company_id=$1, offer_type=$2, ctc=$3, stipend=$4, registration_deadline=$5, offer_date=$6 WHERE id=$7`,
+      [qualifying.company_id, qualifying.offer_type, qualifying.ctc ?? null, qualifying.stipend ?? null, qualifying.registration_deadline || null, qualifying.offer_date || null, studentId]
+    );
+  } else if (!refreshed.company_id && offers.length) {
+    const primary = offers[0];
+    await query(
+      `UPDATE students SET company_id=$1, offer_type=$2, ctc=$3, stipend=$4 WHERE id=$5`,
+      [primary.company_id, primary.offer_type, primary.ctc ?? null, primary.stipend ?? null, studentId]
+    );
+  }
+  return getStudent(studentId);
 };
 
 export const deleteStudent = async (id) => {

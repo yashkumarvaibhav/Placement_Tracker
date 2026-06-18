@@ -15,6 +15,7 @@ import {
   isCombinedOfferType,
   isFullTimeOfferType,
   isInternshipOfferType,
+  isPlacementQualifyingOfferType,
 } from './offerTypes';
 import { OFFICIAL_2025 } from './official2025';
 import { OFFICIAL_2026 } from './official2026';
@@ -22,9 +23,75 @@ import { OFFICIAL_2026 } from './official2026';
 const api = axios.create({ baseURL: import.meta.env.VITE_API_BASE || '/api' });
 const assetBase = import.meta.env.BASE_URL || '/';
 const VIEWER_TOKEN_STORAGE_KEY = 'viewerToken';
+const COMPANY_SORT_FIELDS = new Set(['name', 'ctc', 'stipend', 'totalHired', 'offer_date']);
+const STUDENT_SORT_FIELDS = new Set(['roll_number', 'name', 'ctc', 'stipend', 'offer_date']);
+const VIEW_MODES = new Set(['cards', 'table']);
+
+// Branches a company can recruit from, grouped by degree (cross-degree per the cycle model).
+const BRANCH_OPTIONS = [
+  { degree: 'B.Tech', branches: ['CSE', 'CSE-R', 'CSAI', 'CSAM', 'CSB', 'CSD', 'CSSS', 'ECE', 'EVE', 'CB'] },
+  { degree: 'M.Tech', branches: ['CSE', 'ECE', 'CB'] },
+];
+const branchToken = (degree, branch) => `${degree}:${branch}`;
+const formatBranchToken = (token) => String(token || '').replace(':', ' · ');
+// True if a company recruits a given degree (by its branch tags; legacy rows with no tags
+// fall back to their stored degree so existing per-degree companies keep showing as before).
+const companyRecruitsDegree = (company, degree) => {
+  const branches = Array.isArray(company?.branches) ? company.branches : [];
+  if (branches.length) return branches.some((token) => token.startsWith(`${degree}:`));
+  return company?.degree === degree;
+};
+const DASHBOARD_VIEWS = new Set(['overview', 'official', 'tracker', 'programs', 'compensation', 'recent']);
+const DEFAULT_COMPANY_FILTERS = { type: '', category: '', branchGroup: '' };
+const DEFAULT_STUDENT_FILTERS = { branchGroup: '', programs: [], status: '', offerType: '' };
 const readInitialBatchKey = () => {
   const stored = localStorage.getItem('activeBatchKey');
   return stored === 'mtech-cse-2025' ? 'mtech-2025' : stored || DEFAULT_BATCH_KEY;
+};
+
+const isKnownBatchKey = (key) => BATCHES.some((batch) => batch.key === key);
+const normalizeSortDirection = (value, fallback = true) => (value === 'desc' ? false : value === 'asc' ? true : fallback);
+const splitProgramsParam = (value) => (value ? value.split(',').map((item) => item.trim()).filter(Boolean) : []);
+const readDashboardView = (searchParams) => {
+  const view = searchParams.get('view');
+  return DASHBOARD_VIEWS.has(view) ? view : 'overview';
+};
+
+const readCompanyQueryState = (searchParams) => {
+  const sort = searchParams.get('companySort');
+  const view = searchParams.get('companyView');
+  return {
+    search: searchParams.get('companySearch') || '',
+    filters: {
+      type: searchParams.get('companyType') || '',
+      category: searchParams.get('companyCategory') || '',
+      branchGroup: searchParams.get('companyBranch') || '',
+    },
+    sort: {
+      field: COMPANY_SORT_FIELDS.has(sort) ? sort : 'name',
+      asc: normalizeSortDirection(searchParams.get('companyDir'), !sort || sort === 'name'),
+    },
+    view: VIEW_MODES.has(view) ? view : 'cards',
+  };
+};
+
+const readStudentQueryState = (searchParams) => {
+  const sort = searchParams.get('studentSort');
+  const view = searchParams.get('studentView');
+  return {
+    search: searchParams.get('studentSearch') || '',
+    filters: {
+      branchGroup: searchParams.get('studentBranch') || '',
+      programs: splitProgramsParam(searchParams.get('studentPrograms')),
+      status: searchParams.get('studentStatus') || '',
+      offerType: searchParams.get('studentOfferType') || '',
+    },
+    sort: {
+      field: STUDENT_SORT_FIELDS.has(sort) ? sort : 'roll_number',
+      asc: normalizeSortDirection(searchParams.get('studentDir'), !sort || sort === 'roll_number' || sort === 'name'),
+    },
+    view: VIEW_MODES.has(view) ? view : 'cards',
+  };
 };
 
 const readStoredViewerToken = () => {
@@ -487,13 +554,23 @@ const CompanyForm = ({ initial = {}, onSubmit, onCancel }) => {
     eligible_cgpa: '',
     backlog_allowed: false,
     registration_deadline: '',
+    registration_open_date: '',
     offer_date: '',
+    branches: [],
     ...initial,
   });
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
     setForm((f) => ({ ...f, [name]: type === 'checkbox' ? checked : value }));
+  };
+
+  const toggleBranch = (token) => {
+    setForm((f) => {
+      const set = new Set(f.branches || []);
+      if (set.has(token)) set.delete(token); else set.add(token);
+      return { ...f, branches: [...set] };
+    });
   };
 
   return (
@@ -509,57 +586,80 @@ const CompanyForm = ({ initial = {}, onSubmit, onCancel }) => {
       }}
     >
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px,1fr))' }}>
-        <div>
-          <label>Name</label>
+        <label>
+          Name
           <input name="name" value={form.name} onChange={handleChange} required />
-        </div>
-        <div>
-          <label>Role</label>
+        </label>
+        <label>
+          Role
           <input name="role" value={form.role} onChange={handleChange} />
-        </div>
-        <div>
-          <label>Type</label>
+        </label>
+        <label>
+          Type
           <select name="type" value={form.type} onChange={handleChange}>
             {OFFER_TYPES.map((type) => <option key={type}>{type}</option>)}
           </select>
-        </div>
-        <div>
-          <label>CTC (₹ per annum)</label>
+        </label>
+        <label>
+          CTC (₹ per annum)
           <input name="ctc" type="number" min="0" step="any" placeholder="e.g. 1200000" value={form.ctc ?? ''} onChange={handleChange} />
-        </div>
-        <div>
-          <label>Stipend (₹ per month)</label>
+        </label>
+        <label>
+          Stipend (₹ per month)
           <input name="stipend" type="number" min="0" step="any" placeholder="e.g. 50000" value={form.stipend ?? ''} onChange={handleChange} />
-        </div>
-        <div>
-          <label>Category</label>
+        </label>
+        <label>
+          Category
           <select name="category" value={form.category || ''} onChange={handleChange}>
             <option value="">Select</option>
             <option value="A+">A+</option>
             <option value="A">A</option>
             <option value="B">B</option>
           </select>
-        </div>
-        <div>
-          <label>Eligible CGPA</label>
+        </label>
+        <label>
+          Eligible CGPA
           <input name="eligible_cgpa" type="number" step="0.1" value={form.eligible_cgpa ?? ''} onChange={handleChange} />
-        </div>
-        <div>
-          <label>Backlog Allowed</label>
-          <div className="flex-row">
+        </label>
+        <label>
+          Backlog Allowed
+          <span className="checkbox-row">
             <input name="backlog_allowed" type="checkbox" checked={!!form.backlog_allowed} onChange={handleChange} />
             <span>Yes</span>
-          </div>
-        </div>
-        <div>
-          <label>Last Date of Registration</label>
+          </span>
+        </label>
+        <label>
+          Last Date of Registration
           <input name="registration_deadline" type="date" value={form.registration_deadline || ''} onChange={handleChange} />
-        </div>
-        <div>
-          <label>Date of Offer</label>
+        </label>
+        <label>
+          Registration Opens
+          <input name="registration_open_date" type="date" value={form.registration_open_date || ''} onChange={handleChange} />
+        </label>
+        <label>
+          Date of Offer
           <input name="offer_date" type="date" value={form.offer_date || ''} onChange={handleChange} />
-        </div>
+        </label>
       </div>
+      <fieldset className="branch-multiselect" style={{ border: '1px solid var(--border, #d8d8e0)', borderRadius: 10, padding: 12, marginTop: 12 }}>
+        <legend>Recruiting branches</legend>
+        {BRANCH_OPTIONS.map(({ degree, branches }) => (
+          <div key={degree} style={{ marginBottom: 8 }}>
+            <strong style={{ display: 'block', marginBottom: 4 }}>{degree}</strong>
+            <div className="flex-row" style={{ flexWrap: 'wrap', gap: 10 }}>
+              {branches.map((branch) => {
+                const token = branchToken(degree, branch);
+                return (
+                  <label key={token} className="checkbox-row" style={{ gap: 4 }}>
+                    <input type="checkbox" checked={(form.branches || []).includes(token)} onChange={() => toggleBranch(token)} />
+                    <span>{branch}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </fieldset>
       <div className="flex-row" style={{ justifyContent: 'flex-end', marginTop: 8 }}>
         <button type="button" className="secondary" onClick={onCancel}>Cancel</button>
         <button type="submit">Save</button>
@@ -598,6 +698,8 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
   };
 
   const placed = form.placement_status === 'Placed';
+  // Non-placed students can only hold summer internships (the non-qualifying offer types).
+  const offerTypeOptions = placed ? OFFER_TYPES : OFFER_TYPES.filter((type) => !isPlacementQualifyingOfferType(type));
 
   const updateOfferField = (idx, key, value) => {
     setForm((prev) => {
@@ -660,9 +762,14 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
         }));
 
         const isPlaced = form.placement_status === 'Placed';
+        // Non-placed students retain only non-qualifying offers (summer internships); any
+        // FTE/PPO/winter-intern offer is dropped to stay consistent with the backend.
+        const submitOffers = isPlaced
+          ? normalizedOffers
+          : normalizedOffers.filter((o) => !isPlacementQualifyingOfferType(o.offer_type));
         onSubmit({
           ...form,
-          offers: isPlaced ? normalizedOffers : [],
+          offers: submitOffers,
           company_id: isPlaced ? form.company_id : null,
           offer_type: isPlaced ? form.offer_type : null,
           ctc: isPlaced ? form.ctc : null,
@@ -673,24 +780,24 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
       }}
     >
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px,1fr))' }}>
-        <div>
-          <label>Roll Number</label>
+        <label>
+          Roll Number
           <input name="roll_number" value={form.roll_number} onChange={handleChange} required />
-        </div>
-        <div>
-          <label>Name</label>
+        </label>
+        <label>
+          Name
           <input name="name" value={form.name} onChange={handleChange} required />
-        </div>
-        <div>
-          <label>Program</label>
+        </label>
+        <label>
+          Program
           <select name="program" value={form.program} onChange={handleChange}>
             {studentProgramOptions.map((program) => (
               <option key={program} value={program}>{program}</option>
             ))}
           </select>
-        </div>
-        <div>
-          <label>Placement Status</label>
+        </label>
+        <label>
+          Placement Status
           <select
             name="placement_status"
             value={form.placement_status}
@@ -698,10 +805,11 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
               const nextStatus = e.target.value;
               handleChange(e);
               if (nextStatus !== 'Placed') {
-                // Clear any existing offers/primary company details for non-placed statuses.
+                // Keep summer internships (non-qualifying offers); drop placement-grade offers
+                // and the denormalized primary fields the backend will recompute.
                 setForm((prev) => ({
                   ...prev,
-                  offers: [],
+                  offers: (prev.offers || []).filter((o) => !isPlacementQualifyingOfferType(o.offer_type)),
                   company_id: null,
                   offer_type: '',
                   ctc: '',
@@ -716,60 +824,68 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
               <option key={status} value={status}>{status}</option>
             ))}
           </select>
-        </div>
-        {placed && (
-          <div className="grid" style={{ gridTemplateColumns: '1fr' }}>
-            {(form.offers || []).map((offer, idx) => (
-              <div key={idx} className="card" style={{ margin: 0, borderStyle: 'dashed' }}>
-                <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px,1fr))' }}>
-                  <div>
-                    <label>Company</label>
+        </label>
+        <div className="grid" style={{ gridTemplateColumns: '1fr' }}>
+          {!placed && (
+            <p style={{ fontSize: '0.85rem', opacity: 0.75, margin: '0 0 4px' }}>
+              Summer internships are recorded here as outcomes — they do not count as a placement.
+              To record a full-time, PPO, or winter-internship offer, set the status to Placed.
+            </p>
+          )}
+          {(form.offers || []).map((offer, idx) => (
+            <div key={idx} className="card" style={{ margin: 0, borderStyle: 'dashed' }}>
+              <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px,1fr))' }}>
+                <div className="field-stack">
+                  <label>
+                    Company
                     <select value={offer.company_id || ''} onChange={(e) => hydrateOfferFromCompany(idx, e.target.value)}>
                       <option value="">Select</option>
                       {companies.map((c) => (
                         <option key={c.id} value={c.id}>{c.name}</option>
                       ))}
                     </select>
-                    {offer.company_id && (
-                      <div className="flex-row" style={{ marginTop: 6, justifyContent: 'flex-end' }}>
-                        <button type="button" className="secondary" onClick={() => hydrateOfferFromCompany(idx, offer.company_id, true)}>Reapply company data</button>
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <label>Offer Type</label>
-                    <select value={offer.offer_type || ''} onChange={(e) => updateOfferField(idx, 'offer_type', e.target.value)}>
-                      <option value="">Select</option>
-                      {OFFER_TYPES.map((type) => <option key={type}>{type}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label>CTC (₹ per annum)</label>
-                    <input type="number" min="0" step="any" placeholder="e.g. 1200000" value={offer.ctc ?? ''} onChange={(e) => updateOfferField(idx, 'ctc', e.target.value)} />
-                  </div>
-                  <div>
-                    <label>Stipend (₹ per month)</label>
-                    <input type="number" min="0" step="any" placeholder="e.g. 50000" value={offer.stipend ?? ''} onChange={(e) => updateOfferField(idx, 'stipend', e.target.value)} />
-                  </div>
-                  <div>
-                    <label>Last Date of Registration</label>
-                    <input type="date" value={offer.registration_deadline || ''} onChange={(e) => updateOfferField(idx, 'registration_deadline', e.target.value)} />
-                  </div>
-                  <div>
-                    <label>Date of Offer</label>
-                    <input type="date" value={offer.offer_date || ''} onChange={(e) => updateOfferField(idx, 'offer_date', e.target.value)} />
-                  </div>
+                  </label>
+                  {offer.company_id && (
+                    <div className="flex-row" style={{ marginTop: 6, justifyContent: 'flex-end' }}>
+                      <button type="button" className="secondary" onClick={() => hydrateOfferFromCompany(idx, offer.company_id, true)}>Reapply company data</button>
+                    </div>
+                  )}
                 </div>
-                {form.offers.length > 1 && (
-                  <div className="flex-row" style={{ justifyContent: 'flex-end', marginTop: 8 }}>
-                    <button type="button" className="secondary" onClick={() => removeOffer(idx)}>Remove</button>
-                  </div>
+                <label>
+                  Offer Type
+                  <select value={offer.offer_type || ''} onChange={(e) => updateOfferField(idx, 'offer_type', e.target.value)}>
+                    <option value="">Select</option>
+                    {offerTypeOptions.map((type) => <option key={type}>{type}</option>)}
+                  </select>
+                </label>
+                {placed && (
+                  <label>
+                    CTC (₹ per annum)
+                    <input type="number" min="0" step="any" placeholder="e.g. 1200000" value={offer.ctc ?? ''} onChange={(e) => updateOfferField(idx, 'ctc', e.target.value)} />
+                  </label>
                 )}
+                <label>
+                  Stipend (₹ per month)
+                  <input type="number" min="0" step="any" placeholder="e.g. 50000" value={offer.stipend ?? ''} onChange={(e) => updateOfferField(idx, 'stipend', e.target.value)} />
+                </label>
+                <label>
+                  Last Date of Registration
+                  <input type="date" value={offer.registration_deadline || ''} onChange={(e) => updateOfferField(idx, 'registration_deadline', e.target.value)} />
+                </label>
+                <label>
+                  Date of Offer
+                  <input type="date" value={offer.offer_date || ''} onChange={(e) => updateOfferField(idx, 'offer_date', e.target.value)} />
+                </label>
               </div>
-            ))}
-            <button type="button" className="secondary" onClick={addOffer}>Add Another Offer</button>
-          </div>
-        )}
+              {(form.offers.length > 1 || !placed) && (
+                <div className="flex-row" style={{ justifyContent: 'flex-end', marginTop: 8 }}>
+                  <button type="button" className="secondary" onClick={() => removeOffer(idx)}>Remove</button>
+                </div>
+              )}
+            </div>
+          ))}
+          <button type="button" className="secondary" onClick={addOffer}>{placed ? 'Add Another Offer' : 'Add Summer Internship'}</button>
+        </div>
       </div>
       <div className="flex-row" style={{ justifyContent: 'flex-end', marginTop: 8 }}>
         <button type="button" className="secondary" onClick={onCancel}>Cancel</button>
@@ -784,9 +900,16 @@ const useAdminHeaders = (token) => useMemo(() => ({ headers: { Authorization: `B
 const App = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const routeSearchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const initialCompanyQuery = useMemo(() => readCompanyQueryState(routeSearchParams), []);
+  const initialStudentQuery = useMemo(() => readStudentQueryState(routeSearchParams), []);
+  const initialDashboardView = useMemo(() => readDashboardView(routeSearchParams), []);
   const [viewerToken, setViewerToken] = useState(readStoredViewerToken);
   const [token, setToken] = useState('');
-  const [activeBatchKey, setActiveBatchKey] = useState(readInitialBatchKey);
+  const [activeBatchKey, setActiveBatchKey] = useState(() => {
+    const queryBatch = routeSearchParams.get('batch');
+    return isKnownBatchKey(queryBatch) ? queryBatch : readInitialBatchKey();
+  });
   const initialSnapshot = readBatchCache(activeBatchKey);
   const authHeaders = useAdminHeaders(token);
   const viewerHeaders = useAdminHeaders(viewerToken);
@@ -814,12 +937,21 @@ const App = () => {
   const [stats, setStats] = useState(initialSnapshot?.stats || {});
   const [companies, setCompanies] = useState(initialSnapshot?.companies || []);
   const [students, setStudents] = useState(initialSnapshot?.students || []);
+  const [cycleStudents, setCycleStudents] = useState([]);
+  const [offerSearch, setOfferSearch] = useState('');
+  const [offerStudentId, setOfferStudentId] = useState('');
+  const [offerType, setOfferType] = useState('');
+  const [offerBusy, setOfferBusy] = useState(false);
+  const [offerError, setOfferError] = useState('');
   const [loading, setLoading] = useState(!initialSnapshot);
   const [dataUpdatedAt, setDataUpdatedAt] = useState(initialSnapshot?.cachedAt || null);
+  const [loadedBatchKey, setLoadedBatchKey] = useState(initialSnapshot ? activeBatchKey : null);
   const [error, setError] = useState('');
   const [loginError, setLoginError] = useState('');
   const [authPending, setAuthPending] = useState(false);
   const refreshRequestId = useRef(0);
+  const internalSearchRef = useRef('');
+  const hydratingFromUrlRef = useRef(false);
   const isViewerAuthed = !!viewerToken;
 
   const formatInr = (val, period = 'p.a.') => {
@@ -922,6 +1054,7 @@ const App = () => {
     setCompanies([]);
     setStudents([]);
     setDataUpdatedAt(null);
+    setLoadedBatchKey(null);
   };
 
   const [showCompanyModal, setShowCompanyModal] = useState(false);
@@ -930,20 +1063,66 @@ const App = () => {
   const [editStudent, setEditStudent] = useState(null);
 
   // Companies page: search, sort, filter, detail
-  const [companySearch, setCompanySearch] = useState('');
-  const [companySort, setCompanySort] = useState({ field: 'name', asc: true });
-  const [companyFilters, setCompanyFilters] = useState({ type: '', category: '', branchGroup: '' });
+  const [companySearch, setCompanySearch] = useState(initialCompanyQuery.search);
+  const [companySort, setCompanySort] = useState(initialCompanyQuery.sort);
+  const [companyFilters, setCompanyFilters] = useState(initialCompanyQuery.filters);
+  const [companyView, setCompanyView] = useState(initialCompanyQuery.view);
+  const [selectedCompanyId, setSelectedCompanyId] = useState(routeSearchParams.get('company') || '');
   const [selectedCompany, setSelectedCompany] = useState(null);
 
   // Students page: search, sort, filter
-  const [studentSearch, setStudentSearch] = useState('');
-  const [studentSort, setStudentSort] = useState({ field: 'roll_number', asc: true });
-  const [studentFilters, setStudentFilters] = useState({ branchGroup: '', programs: [], status: '', offerType: '' });
+  const [studentSearch, setStudentSearch] = useState(initialStudentQuery.search);
+  const [studentSort, setStudentSort] = useState(initialStudentQuery.sort);
+  const [studentFilters, setStudentFilters] = useState(initialStudentQuery.filters);
+  const [studentView, setStudentView] = useState(initialStudentQuery.view);
+  const [selectedStudentId, setSelectedStudentId] = useState(routeSearchParams.get('student') || '');
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [dashboardBranchFilter, setDashboardBranchFilter] = useState('ALL');
+  const [dashboardView, setDashboardView] = useState(initialDashboardView);
   const [mobileHeaderHidden, setMobileHeaderHidden] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [themeMode, setThemeMode] = useState(localStorage.getItem('themeMode') || 'light');
+  const canonicalDashboardView = useMemo(() => {
+    if (dashboardView === 'overview') return dashboardView;
+    if (dashboardView === 'official') return isOfficial2025 || isOfficial2026 ? dashboardView : 'overview';
+    if (dashboardView === 'tracker') return !isAggregateOnly ? dashboardView : 'overview';
+    if (dashboardView === 'programs') return !isAggregateOnly && !isPlacementRecordsOnly ? dashboardView : 'overview';
+    if (dashboardView === 'compensation' || dashboardView === 'recent') return !isAggregateOnly && !isOfficial2025 ? dashboardView : 'overview';
+    return 'overview';
+  }, [dashboardView, isAggregateOnly, isOfficial2025, isOfficial2026, isPlacementRecordsOnly]);
+
+  useEffect(() => {
+    if (internalSearchRef.current === location.search) {
+      internalSearchRef.current = '';
+      return;
+    }
+
+    hydratingFromUrlRef.current = true;
+
+    const searchParams = new URLSearchParams(location.search);
+    const queryBatch = searchParams.get('batch');
+    if (isKnownBatchKey(queryBatch)) {
+      setActiveBatchKey((current) => (current === queryBatch ? current : queryBatch));
+    }
+
+    if (location.pathname === '/') {
+      setDashboardView(readDashboardView(searchParams));
+    } else if (location.pathname === '/companies') {
+      const query = readCompanyQueryState(searchParams);
+      setCompanySearch(query.search);
+      setCompanyFilters(query.filters);
+      setCompanySort(query.sort);
+      setCompanyView(query.view);
+      setSelectedCompanyId(searchParams.get('company') || '');
+    } else if (location.pathname === '/students') {
+      const query = readStudentQueryState(searchParams);
+      setStudentSearch(query.search);
+      setStudentFilters(query.filters);
+      setStudentSort(query.sort);
+      setStudentView(query.view);
+      setSelectedStudentId(searchParams.get('student') || '');
+    }
+  }, [location.pathname, location.search]);
 
   useEffect(() => {
     localStorage.setItem('activeBatchKey', activeBatch.key);
@@ -954,25 +1133,105 @@ const App = () => {
       setCompanies(cachedSnapshot.companies);
       setStudents(cachedSnapshot.students);
       setDataUpdatedAt(cachedSnapshot.cachedAt || null);
+      setLoadedBatchKey(activeBatch.key);
       setLoading(false);
     } else {
       setStats({});
       setCompanies([]);
       setStudents([]);
       setDataUpdatedAt(null);
+      setLoadedBatchKey(null);
       setLoading(true);
     }
 
     setError('');
-    setCompanyFilters({ type: '', category: '', branchGroup: '' });
-    setStudentFilters({ branchGroup: '', programs: [], status: '', offerType: '' });
     setDashboardBranchFilter('ALL');
-    setCompanySearch('');
-    setStudentSearch('');
     setSelectedCompany(null);
     setSelectedStudent(null);
     setMobileNavOpen(false);
   }, [activeBatch.key]);
+
+  useEffect(() => {
+    if (!isViewerAuthed || location.pathname === '/admin') return;
+    if (hydratingFromUrlRef.current) {
+      hydratingFromUrlRef.current = false;
+      return;
+    }
+
+    const params = new URLSearchParams(location.search);
+    params.set('batch', activeBatch.key);
+
+    if (location.pathname === '/') {
+      canonicalDashboardView !== 'overview' ? params.set('view', canonicalDashboardView) : params.delete('view');
+      ['companySearch', 'companyType', 'companyCategory', 'companyBranch', 'companySort', 'companyDir', 'companyView', 'company', 'studentSearch', 'studentBranch', 'studentPrograms', 'studentStatus', 'studentOfferType', 'studentSort', 'studentDir', 'studentView', 'student'].forEach((key) => params.delete(key));
+    } else if (location.pathname === '/companies') {
+      companySearch ? params.set('companySearch', companySearch) : params.delete('companySearch');
+      companyFilters.type ? params.set('companyType', companyFilters.type) : params.delete('companyType');
+      companyFilters.category ? params.set('companyCategory', companyFilters.category) : params.delete('companyCategory');
+      companyFilters.branchGroup ? params.set('companyBranch', companyFilters.branchGroup) : params.delete('companyBranch');
+      companySort.field !== 'name' ? params.set('companySort', companySort.field) : params.delete('companySort');
+      companySort.asc === false ? params.set('companyDir', 'desc') : params.delete('companyDir');
+      companyView !== 'cards' ? params.set('companyView', companyView) : params.delete('companyView');
+      selectedCompanyId ? params.set('company', selectedCompanyId) : params.delete('company');
+      ['view', 'studentSearch', 'studentBranch', 'studentPrograms', 'studentStatus', 'studentOfferType', 'studentSort', 'studentDir', 'studentView', 'student'].forEach((key) => params.delete(key));
+    } else if (location.pathname === '/students') {
+      studentSearch ? params.set('studentSearch', studentSearch) : params.delete('studentSearch');
+      studentFilters.branchGroup ? params.set('studentBranch', studentFilters.branchGroup) : params.delete('studentBranch');
+      studentFilters.programs.length ? params.set('studentPrograms', studentFilters.programs.join(',')) : params.delete('studentPrograms');
+      studentFilters.status ? params.set('studentStatus', studentFilters.status) : params.delete('studentStatus');
+      studentFilters.offerType ? params.set('studentOfferType', studentFilters.offerType) : params.delete('studentOfferType');
+      studentSort.field !== 'roll_number' ? params.set('studentSort', studentSort.field) : params.delete('studentSort');
+      studentSort.asc === false ? params.set('studentDir', 'desc') : params.delete('studentDir');
+      studentView !== 'cards' ? params.set('studentView', studentView) : params.delete('studentView');
+      selectedStudentId ? params.set('student', selectedStudentId) : params.delete('student');
+      ['view', 'companySearch', 'companyType', 'companyCategory', 'companyBranch', 'companySort', 'companyDir', 'companyView', 'company'].forEach((key) => params.delete(key));
+    }
+
+    const nextSearch = params.toString();
+    const nextSearchWithPrefix = nextSearch ? `?${nextSearch}` : '';
+    if (nextSearchWithPrefix !== location.search) {
+      internalSearchRef.current = nextSearchWithPrefix;
+      navigate({ pathname: location.pathname, search: nextSearchWithPrefix }, { replace: true });
+    }
+  }, [activeBatch.key, canonicalDashboardView, companyFilters, companySearch, companySort, companyView, isViewerAuthed, location.pathname, location.search, navigate, selectedCompanyId, selectedStudentId, studentFilters, studentSearch, studentSort, studentView]);
+
+  useEffect(() => {
+    if (location.pathname !== '/companies') return;
+
+    if (!selectedCompanyId) {
+      if (selectedCompany) setSelectedCompany(null);
+      return;
+    }
+    if (loadedBatchKey !== activeBatch.key) {
+      if (selectedCompany) setSelectedCompany(null);
+      return;
+    }
+    const matchedCompany = companies.find((company) => String(company.id) === String(selectedCompanyId));
+    if (matchedCompany && String(selectedCompany?.id) !== String(matchedCompany.id)) {
+      setSelectedCompany(matchedCompany);
+    } else if (!matchedCompany && selectedCompany) {
+      setSelectedCompany(null);
+    }
+  }, [activeBatch.key, companies, loadedBatchKey, location.pathname, selectedCompany, selectedCompanyId]);
+
+  useEffect(() => {
+    if (location.pathname !== '/students') return;
+
+    if (!selectedStudentId) {
+      if (selectedStudent) setSelectedStudent(null);
+      return;
+    }
+    if (loadedBatchKey !== activeBatch.key) {
+      if (selectedStudent) setSelectedStudent(null);
+      return;
+    }
+    const matchedStudent = students.find((student) => String(student.id) === String(selectedStudentId));
+    if (matchedStudent && String(selectedStudent?.id) !== String(matchedStudent.id)) {
+      setSelectedStudent(matchedStudent);
+    } else if (!matchedStudent && selectedStudent) {
+      setSelectedStudent(null);
+    }
+  }, [activeBatch.key, loadedBatchKey, location.pathname, selectedStudent, selectedStudentId, students]);
 
   useEffect(() => {
     if (!viewerToken) {
@@ -1008,6 +1267,7 @@ const App = () => {
         setStats({});
         setCompanies([]);
         setStudents([]);
+        setLoadedBatchKey(null);
       }
     };
 
@@ -1125,6 +1385,96 @@ const App = () => {
     setThemeMode((current) => (current === 'light' ? 'dark' : 'light'));
   };
 
+  const copyCurrentLink = async () => {
+    if (typeof window === 'undefined' || !navigator.clipboard) return;
+    await navigator.clipboard.writeText(window.location.href);
+  };
+
+  const resetOfferForm = () => {
+    setOfferSearch('');
+    setOfferStudentId('');
+    setOfferType('');
+    setOfferError('');
+  };
+
+  const openCompanyDetail = (company) => {
+    setSelectedCompany(company);
+    setSelectedCompanyId(company?.id ? String(company.id) : '');
+    resetOfferForm();
+  };
+
+  const closeCompanyDetail = () => {
+    setSelectedCompany(null);
+    setSelectedCompanyId('');
+    resetOfferForm();
+  };
+
+  const offerCandidates = useMemo(() => {
+    const q = offerSearch.trim().toLowerCase();
+    if (!q || offerStudentId) return [];
+    return cycleStudents
+      .filter((s) => s.name?.toLowerCase().includes(q) || String(s.roll_number).toLowerCase().includes(q))
+      .slice(0, 8);
+  }, [offerSearch, offerStudentId, cycleStudents]);
+
+  const addCompanyOffer = async () => {
+    if (!isAdmin || !selectedCompany || !offerStudentId) return;
+    setOfferBusy(true);
+    setOfferError('');
+    try {
+      await api.post('/offers', {
+        student_id: Number(offerStudentId),
+        company_id: selectedCompany.id,
+        offer_type: offerType || selectedCompany.type || null,
+      }, authHeaders);
+      resetOfferForm();
+      refresh();
+    } catch (err) {
+      setOfferError(err.response?.data?.message || err.message);
+    } finally {
+      setOfferBusy(false);
+    }
+  };
+
+  const openStudentDetail = (student) => {
+    setSelectedStudent(student);
+    setSelectedStudentId(student?.id ? String(student.id) : '');
+  };
+
+  const closeStudentDetail = () => {
+    setSelectedStudent(null);
+    setSelectedStudentId('');
+  };
+
+  const handleBatchChange = (batchKey) => {
+    if (!isKnownBatchKey(batchKey) || batchKey === activeBatch.key) return;
+    closeCompanyDetail();
+    closeStudentDetail();
+    setActiveBatchKey(batchKey);
+  };
+
+  // Placement cycles = graduation years, each grouping the degree-batches of that year.
+  const CYCLES = useMemo(() => {
+    const order = [];
+    const byYear = new Map();
+    for (const batch of BATCHES) {
+      if (!byYear.has(batch.graduation_year)) {
+        const cycle = { year: batch.graduation_year, batches: [] };
+        byYear.set(batch.graduation_year, cycle);
+        order.push(cycle);
+      }
+      byYear.get(batch.graduation_year).batches.push(batch);
+    }
+    return order;
+  }, []);
+  const activeCycle = CYCLES.find((cycle) => cycle.year === activeBatch.graduation_year) || CYCLES[0];
+  const handleCycleChange = (year) => {
+    const cycle = CYCLES.find((entry) => entry.year === year);
+    if (!cycle) return;
+    const sameDegree = cycle.batches.find((batch) => batch.degree === activeBatch.degree);
+    handleBatchChange((sameDegree || cycle.batches[0]).key);
+  };
+
   const availablePrograms = useMemo(
     () => sortPrograms([...new Set((stats.available_programs || students.map((student) => student.program)).filter(Boolean))]),
     [stats.available_programs, students]
@@ -1151,6 +1501,70 @@ const App = () => {
       : dashboardBranchSummaries[dashboardBranchFilter] || EMPTY_SLICE_SUMMARY),
     [dashboardBranchFilter, dashboardBranchSummaries, isAggregateOnly, stats.branch_summary]
   );
+
+  const dataProvenance = useMemo(() => {
+    if (isOfficial2026) {
+      return {
+        label: 'Official plus tracker',
+        source: 'College-published 2026 figures are shown separately from tracker records.',
+        coverage: 'Official campus metrics, student/company tracker records, and imported offer details are not merged into one percentage.',
+      };
+    }
+    if (isOfficial2025) {
+      return {
+        label: 'Official statistics',
+        source: 'Placement percentages come from official 2025 figures.',
+        coverage: 'Uploaded student and company records remain browsable but are not used to infer cohort placement rates.',
+      };
+    }
+    if (isAggregateOnly) {
+      return {
+        label: 'Aggregate archive',
+        source: 'Historical M.Tech CSE company-level aggregate.',
+        coverage: 'No student names, placement rates, or compensation fields are inferred from this source.',
+      };
+    }
+    if (isPlacementRecordsOnly) {
+      return {
+        label: 'Placed-record archive',
+        source: 'Historical student-level placement records.',
+        coverage: 'The source lists placed students only, so unplaced counts and placement percentages are intentionally withheld.',
+      };
+    }
+    return {
+      label: 'Tracker dataset',
+      source: 'Student, company, and offer records stored in Placement Atlas.',
+      coverage: 'Placement rates use eligible/sitting students as the denominator; excluded students are kept visible for transparency.',
+    };
+  }, [isAggregateOnly, isOfficial2025, isOfficial2026, isPlacementRecordsOnly]);
+
+  const dashboardViews = useMemo(() => {
+    const views = [{ key: 'overview', label: 'Overview' }];
+
+    if (isOfficial2025 || isOfficial2026) {
+      views.push({ key: 'official', label: 'Official' });
+    }
+
+    if (!isAggregateOnly) {
+      views.push({ key: 'tracker', label: isOfficial2025 ? 'Records' : 'Tracker' });
+    }
+
+    if (!isAggregateOnly && !isPlacementRecordsOnly) {
+      views.push({ key: 'programs', label: 'Programs' });
+    }
+
+    if (!isAggregateOnly && !isOfficial2025) {
+      views.push({ key: 'compensation', label: 'Compensation' });
+      views.push({ key: 'recent', label: 'Recent' });
+    }
+
+    return views;
+  }, [isAggregateOnly, isOfficial2025, isOfficial2026, isPlacementRecordsOnly]);
+
+  useEffect(() => {
+    if (dashboardViews.some((view) => view.key === dashboardView)) return;
+    setDashboardView('overview');
+  }, [dashboardView, dashboardViews]);
 
   const toggleProgramFilter = (program) => {
     setStudentFilters((prev) => ({
@@ -1332,6 +1746,18 @@ const App = () => {
     };
   }, [filteredCompanies, companyHiringStats, isAggregateOnly]);
 
+  const companyFilterCounts = useMemo(() => {
+    const visibleCompanies = isAdmin ? companies : companies.filter((company) => {
+      const hiring = companyHiringStats[company.id];
+      return (hiring?.total || 0) > 0 || (hiring?.reported || 0) > 0;
+    });
+    return {
+      types: OFFER_TYPES.reduce((acc, type) => ({ ...acc, [type]: visibleCompanies.filter((company) => company.type === type).length }), {}),
+      categories: ['A+', 'A', 'B'].reduce((acc, category) => ({ ...acc, [category]: visibleCompanies.filter((company) => (company.category || '').toUpperCase() === category).length }), {}),
+      branches: ['CSE', 'ECE', 'CB'].reduce((acc, branch) => ({ ...acc, [branch]: visibleCompanies.filter((company) => (companyHiringStats[company.id]?.[branch] || 0) > 0).length }), {}),
+    };
+  }, [companies, companyHiringStats, isAdmin]);
+
   const studentOverview = useMemo(() => {
     const placed = filteredStudents.filter((student) => student.placement_status === 'Placed').length;
     const eligible = filteredStudents.filter(isPlacementEligibleStudent).length;
@@ -1353,6 +1779,19 @@ const App = () => {
       programs: new Set(filteredStudents.map((student) => student.program).filter(Boolean)).size,
     };
   }, [filteredStudents]);
+
+  const studentFilterCounts = useMemo(() => ({
+    branches: ['CSE', 'ECE', 'CB'].reduce((acc, branch) => ({ ...acc, [branch]: students.filter((student) => (student.branch_group || getBranchGroup(student.program)) === branch).length }), {}),
+    statuses: STUDENT_STATUS_OPTIONS.reduce((acc, status) => ({ ...acc, [status]: students.filter((student) => student.placement_status === status).length }), {}),
+    offerTypes: OFFER_TYPES.reduce((acc, type) => ({
+      ...acc,
+      [type]: students.filter((student) => {
+        if (student.offers?.length) return student.offers.some((offer) => offer.offer_type === type);
+        return student.offer_type === type;
+      }).length,
+    }), {}),
+    programs: availablePrograms.reduce((acc, program) => ({ ...acc, [program]: students.filter((student) => student.program === program).length }), {}),
+  }), [availablePrograms, students]);
 
   const dashboardVisuals = useMemo(() => {
     const cohortStudents = students.filter((student) => (
@@ -1417,6 +1856,23 @@ const App = () => {
     })),
   }), [availablePrograms, filteredStudents]);
 
+  const selectedCompanyIndex = selectedCompany
+    ? filteredCompanies.findIndex((company) => String(company.id) === String(selectedCompany.id))
+    : -1;
+  const selectedStudentIndex = selectedStudent
+    ? filteredStudents.findIndex((student) => String(student.id) === String(selectedStudent.id))
+    : -1;
+  const moveSelectedCompany = (offset) => {
+    if (selectedCompanyIndex < 0 || !filteredCompanies.length) return;
+    const nextIndex = (selectedCompanyIndex + offset + filteredCompanies.length) % filteredCompanies.length;
+    openCompanyDetail(filteredCompanies[nextIndex]);
+  };
+  const moveSelectedStudent = (offset) => {
+    if (selectedStudentIndex < 0 || !filteredStudents.length) return;
+    const nextIndex = (selectedStudentIndex + offset + filteredStudents.length) % filteredStudents.length;
+    openStudentDetail(filteredStudents[nextIndex]);
+  };
+
   const SortIcon = ({ field, current }) => {
     const active = current.field === field;
     return <span className="sort-icon" aria-hidden="true">{active ? (current.asc ? '▲' : '▼') : '⇅'}</span>;
@@ -1439,20 +1895,31 @@ const App = () => {
     const fetchData = async () => {
       try {
         await api.get('/ping', { signal: controller.signal });
-        const params = {
+        const batchParams = {
           params: { batch: batchKey },
           headers: viewerHeaders.headers,
           signal: controller.signal,
         };
-        const [statsRes, companyRes, studentRes] = await Promise.all([
-          api.get('/stats', params),
-          api.get('/companies', params),
-          api.get('/students', params),
+        const batchConfig = getBatchConfig(batchKey);
+        const cycleParams = {
+          params: { cycle: batchConfig.graduation_year },
+          headers: viewerHeaders.headers,
+          signal: controller.signal,
+        };
+        const [statsRes, companyRes, studentRes, cycleStudentRes] = await Promise.all([
+          api.get('/stats', batchParams),
+          api.get('/companies', cycleParams),
+          api.get('/students', batchParams),
+          api.get('/students', cycleParams),
         ]);
+
+        // Companies are cycle-scoped (cross-degree); the per-degree view shows only those
+        // recruiting this degree, keeping the dashboard unchanged for existing data.
+        const companiesForDegree = (companyRes.data || []).filter((company) => companyRecruitsDegree(company, batchConfig.degree));
 
         const nextSnapshot = {
           stats: statsRes.data,
-          companies: companyRes.data,
+          companies: companiesForDegree,
           students: studentRes.data,
         };
 
@@ -1460,7 +1927,9 @@ const App = () => {
         setStats(nextSnapshot.stats);
         setCompanies(nextSnapshot.companies);
         setStudents(nextSnapshot.students);
+        setCycleStudents(cycleStudentRes.data || []);
         writeBatchCache(batchKey, nextSnapshot);
+        setLoadedBatchKey(batchKey);
         setDataUpdatedAt(new Date().toISOString());
         setError('');
         setLoading(false);
@@ -1602,9 +2071,15 @@ const App = () => {
 
           <div className="nav-user-row">
             <label className="nav-batch-select">
-              <span>Cohort</span>
-              <select value={activeBatch.key} onChange={(event) => setActiveBatchKey(event.target.value)}>
-                {BATCHES.map((batch) => <option key={batch.key} value={batch.key}>{batch.label}</option>)}
+              <span>Cycle</span>
+              <select value={activeBatch.key} onChange={(event) => handleBatchChange(event.target.value)}>
+                {CYCLES.map((cycle) => (
+                  <optgroup key={cycle.year} label={`${cycle.year} cycle`}>
+                    {cycle.batches.map((batch) => (
+                      <option key={batch.key} value={batch.key}>{batch.degree}{batch.academic_year ? ` · ${batch.academic_year}` : ''}</option>
+                    ))}
+                  </optgroup>
+                ))}
               </select>
             </label>
             <div className="nav-actions">
@@ -1636,14 +2111,39 @@ const App = () => {
           path="/"
           element={(
             <main className="container dashboard-page">
-              <div className="batch-tabs" aria-label="Select placement cohort">
-                {BATCHES.map((batch) => (
-                  <button key={batch.key} type="button" className={activeBatch.key === batch.key ? 'batch-tab active' : 'batch-tab'} onClick={() => setActiveBatchKey(batch.key)}>
-                    <span>{batch.degree}</span><strong>{batch.academic_year || batch.graduation_year}</strong>
+              <div className="cycle-tabs" aria-label="Select placement cycle" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+                {CYCLES.map((cycle) => (
+                  <button key={cycle.year} type="button" className={activeCycle.year === cycle.year ? 'batch-tab active' : 'batch-tab'} aria-pressed={activeCycle.year === cycle.year} onClick={() => handleCycleChange(cycle.year)}>
+                    <strong>{cycle.year}</strong>
+                  </button>
+                ))}
+              </div>
+              <div className="batch-tabs" aria-label={`Degrees in the ${activeCycle.year} cycle`}>
+                {activeCycle.batches.map((batch) => (
+                  <button key={batch.key} type="button" className={activeBatch.key === batch.key ? 'batch-tab active' : 'batch-tab'} aria-pressed={activeBatch.key === batch.key} onClick={() => handleBatchChange(batch.key)}>
+                    <span>{batch.degree}</span>{batch.academic_year ? <strong>{batch.academic_year}</strong> : null}
                   </button>
                 ))}
               </div>
 
+              {dashboardViews.length > 1 && (
+                <div className="dashboard-view-tabs" aria-label="Dashboard view">
+                  {dashboardViews.map((view) => (
+                    <button
+                      key={view.key}
+                      type="button"
+                      className={dashboardView === view.key ? 'active' : ''}
+                      aria-pressed={dashboardView === view.key}
+                      onClick={() => setDashboardView(view.key)}
+                    >
+                      {view.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {dashboardView === 'overview' && (
+                <>
               <section className="editorial-hero">
                 <div className="editorial-hero-copy">
                   <span className="eyebrow">{isOfficial2026 ? 'Tracker dataset' : 'Placement intelligence'} · {activeBatch.label}</span>
@@ -1705,7 +2205,67 @@ const App = () => {
                 </div>
               </section>
 
-              {isAggregateOnly && (
+              <section className="data-status-band" aria-label="Data status">
+                <div>
+                  <span className="eyebrow">Data status</span>
+                  <h2>{dataProvenance.label}</h2>
+                </div>
+                <p>{dataProvenance.source}</p>
+                <p>{dataProvenance.coverage}</p>
+                <p>{dataUpdatedAt ? `Loaded ${formatRelative(dataUpdatedAt)}.` : 'Latest load time is not available yet.'}</p>
+              </section>
+
+              <section className="metric-ledger overview-metric-ledger">
+                {isAggregateOnly ? (
+                  <>
+                    <MetricTile label="Reported offers" value={stats.total_offers || 0} note={`Academic year ${activeBatch.academic_year}`} />
+                    <MetricTile label="Companies with offers" value={stats.number_of_companies || 0} note="Positive offer count" />
+                    <MetricTile label="Recruiters listed" value={stats.total_companies_listed || 0} note="Includes zero-offer rows" />
+                  </>
+                ) : isOfficial2025 ? (
+                  <>
+                    <MetricTile label="Official campus placement" value={`${OFFICIAL_2025.campus_placement_percentage}%`} note="Official figure" />
+                    <MetricTile label="Companies visited" value={OFFICIAL_2025.companies} note="Official campus total" />
+                    <MetricTile label="Total offers" value={OFFICIAL_2025.total_offers} note="Official offer count" />
+                    <MetricTile label={`${activeBatch.degree} average`} value={`${official2025AverageLpa.toFixed(2)} LPA`} note="Official average" />
+                  </>
+                ) : isOfficial2026 ? (
+                  <>
+                    <MetricTile label="Official campus placement" value={`${OFFICIAL_2026.campus_placement_percentage.toFixed(2)}%`} note="College-published" />
+                    <MetricTile label="Tracker companies" value={stats.number_of_companies ?? 0} note="Recorded on this site" />
+                    <MetricTile label="Tracker offers" value={activeOverviewSummary.total_offers || 0} note="Recorded offer rows" />
+                    <MetricTile label="Median CTC" value={formatInr(activeOverviewSummary.median_ctc, 'p.a.')} note="Tracker-derived" />
+                  </>
+                ) : (
+                  <>
+                    <MetricTile label={isPlacementRecordsOnly ? 'Recorded placed' : 'Placed students'} value={activeOverviewSummary.placed_students || 0} note={isPlacementRecordsOnly ? 'Source records only' : `${activeOverviewSummary.eligible_students || 0} eligible`} />
+                    <MetricTile label="Companies" value={stats.number_of_companies ?? 0} note="Current cohort" />
+                    <MetricTile label="Total offers" value={activeOverviewSummary.total_offers || 0} note="Recorded offer rows" />
+                    <MetricTile label="Median CTC" value={formatInr(activeOverviewSummary.median_ctc, 'p.a.')} note="Tracker-derived" />
+                  </>
+                )}
+              </section>
+
+              {dashboardViews.length > 1 && (
+                <section className="dashboard-jump-grid" aria-label="Dashboard shortcuts">
+                  {dashboardViews.filter((view) => view.key !== 'overview').map((view) => (
+                    <button key={view.key} type="button" onClick={() => setDashboardView(view.key)}>
+                      <span className="eyebrow">{view.label}</span>
+                      <strong>
+                        {view.key === 'official' ? 'College-published numbers'
+                          : view.key === 'tracker' ? (isOfficial2025 ? 'Record-level references' : 'Tracker-derived view')
+                          : view.key === 'programs' ? 'Branch and program detail'
+                          : view.key === 'compensation' ? 'Compensation distribution'
+                          : 'Latest company activity'}
+                      </strong>
+                    </button>
+                  ))}
+                </section>
+              )}
+                </>
+              )}
+
+              {isAggregateOnly && dashboardView === 'overview' && (
                 <section className="historical-overview">
                   <div className="section-intro">
                     <div><span className="eyebrow">Aggregate source</span><h2>Offer volume by recruiter.</h2></div>
@@ -1725,7 +2285,7 @@ const App = () => {
 
               {!isAggregateOnly && (
                 <>
-              {isOfficial2025 && (
+              {isOfficial2025 && dashboardView === 'official' && (
                 <section className="official-placement-dashboard">
                   <aside className="official-data-note">
                     <div>
@@ -1786,7 +2346,7 @@ const App = () => {
                   </section>
                 </section>
               )}
-              {isOfficial2026 && (
+              {isOfficial2026 && dashboardView === 'official' && (
                 <section className="official-placement-dashboard official-2026-dashboard">
                   <aside className="official-data-note">
                     <div>
@@ -1848,35 +2408,42 @@ const App = () => {
                     </div>
                   </section>
 
-                  <div className="dataset-divider">
-                    <span className="eyebrow">Tracker dataset · {activeBatch.label}</span>
-                    <h2>Recorded data on this website</h2>
-                    <p>The dashboard below is calculated only from student, company, and offer records currently stored in this tracker. It is intentionally separate from the official publication above.</p>
+                </section>
+              )}
+              {isOfficial2025 && dashboardView === 'tracker' && (
+                <section className="dashboard-section record-reference-section">
+                  <div className="section-intro">
+                    <div><span className="eyebrow">Record-level references</span><h2>Uploaded records remain browsable, but not rate-derived.</h2></div>
+                    <p>The 2025 uploaded student and company rows are retained for lookup. Placement percentages on this dashboard come only from official statistics.</p>
+                  </div>
+                  <div className="dashboard-jump-grid">
+                    <Link to="/companies"><span className="eyebrow">Companies</span><strong>Browse recorded recruiters</strong></Link>
+                    <Link to="/students"><span className="eyebrow">Students</span><strong>Browse uploaded outcomes</strong></Link>
                   </div>
                 </section>
               )}
-              {isPlacementRecordsOnly && !isOfficial2025 && (
+              {isPlacementRecordsOnly && !isOfficial2025 && dashboardView === 'tracker' && (
                 <aside className="disclaimer-card">
                   <span className="eyebrow">Historical source scope</span>
                   <p>This source contains placement outcomes, not the full graduating roster. Counts and compensation are shown, but placement percentages and unplaced-student totals are intentionally not inferred.</p>
                   {stats.historical_reported_offers > 0 && <p>The same M.Tech 2025 view also includes the 2024-25 CSE aggregate: {stats.historical_reported_offers} reported offers across {stats.historical_recruiters} recruiters. These aggregate counts are labeled separately from student-linked offers.</p>}
                 </aside>
               )}
-              {!isOfficial2025 && <section className="dashboard-control-row">
+              {!isOfficial2025 && (dashboardView === 'tracker' || dashboardView === 'programs' || dashboardView === 'compensation') && <section className="dashboard-control-row">
                 <div>
                   <span className="eyebrow">Current lens</span>
                   <h2>{dashboardBranchFilter === 'ALL' ? 'All programs' : DASHBOARD_BRANCH_LABELS[dashboardBranchFilter]}</h2>
                 </div>
                 <div className="filter-chip-row">
                   {dashboardBranchFilters.map((branchGroup) => (
-                    <button key={branchGroup} type="button" className={dashboardBranchFilter === branchGroup ? 'filter-chip active' : 'filter-chip'} onClick={() => setDashboardBranchFilter(branchGroup)}>
+                    <button key={branchGroup} type="button" className={dashboardBranchFilter === branchGroup ? 'filter-chip active' : 'filter-chip'} aria-pressed={dashboardBranchFilter === branchGroup} onClick={() => setDashboardBranchFilter(branchGroup)}>
                       {DASHBOARD_BRANCH_LABELS[branchGroup] || branchGroup}
                     </button>
                   ))}
                 </div>
               </section>}
 
-              {!isOfficial2025 && <section className="metric-ledger comp-ledger">
+              {!isOfficial2025 && dashboardView === 'compensation' && <section className="metric-ledger comp-ledger">
                 <MetricTile metricKey="highest_ctc" label="Highest CTC" value={formatInr(activeOverviewSummary.highest_ctc, 'p.a.')} note="Peak recorded package" />
                 <MetricTile metricKey="median_ctc" label="Median CTC" value={formatInr(activeOverviewSummary.median_ctc, 'p.a.')} note="Middle of recorded offers" />
                 <MetricTile metricKey="average_ctc" label="Average CTC" value={formatInr(activeOverviewSummary.average_ctc, 'p.a.')} note="Mean of recorded offers" />
@@ -1885,7 +2452,16 @@ const App = () => {
                 <MetricTile metricKey="total_Aplus_offers" label="A+ offers" value={activeOverviewSummary.total_Aplus_offers || 0} note="Premium category outcomes" />
               </section>}
 
-              {!isOfficial2025 && <section className="insight-grid">
+              {!isOfficial2025 && dashboardView === 'compensation' && (
+                <section className="dashboard-section compensation-focus-section">
+                  <article className="insight-panel compensation-panel">
+                    <div className="panel-heading"><div><span className="eyebrow">Compensation</span><h2>CTC distribution</h2></div><small>Offer count by band</small></div>
+                    <HorizontalBars items={dashboardVisuals.compensationBands} />
+                  </article>
+                </section>
+              )}
+
+              {!isOfficial2025 && dashboardView === 'tracker' && <section className="insight-grid tracker-insight-grid">
                 <article className="insight-panel outcome-panel">
                   <div className="panel-heading">
                     <div><span className="eyebrow">Outcome composition</span><h2>{isPlacementRecordsOnly ? 'Recorded placed students' : 'Where the cohort stands'}</h2></div>
@@ -1923,13 +2499,9 @@ const App = () => {
                   </div>
                 </article>
 
-                <article className="insight-panel compensation-panel">
-                  <div className="panel-heading"><div><span className="eyebrow">Compensation</span><h2>CTC distribution</h2></div><small>Offer count by band</small></div>
-                  <HorizontalBars items={dashboardVisuals.compensationBands} />
-                </article>
               </section>}
 
-              {!isPlacementRecordsOnly && <section className="dashboard-section branch-section">
+              {!isPlacementRecordsOnly && dashboardView === 'programs' && <section className="dashboard-section branch-section">
                 <div className="section-intro">
                   <div><span className="eyebrow">Program comparison</span><h2>Every discipline has its own story.</h2></div>
                   <p>Placement rates use eligible and sitting students as the denominator. Offer counts may exceed placed students where multiple offers are recorded.</p>
@@ -1945,7 +2517,7 @@ const App = () => {
                 </div>
               </section>}
 
-              {!isOfficial2025 && <section className="dashboard-section program-section">
+              {!isOfficial2025 && dashboardView === 'programs' && <section className="dashboard-section program-section">
                 <div className="section-intro">
                   <div><span className="eyebrow">Program notes</span><h2>A closer reading.</h2></div>
                   <span className="section-count">{filteredProgramSummaries.length} programs</span>
@@ -1967,11 +2539,11 @@ const App = () => {
                 </div>
               </section>}
 
-              {!isOfficial2025 && <section className="dashboard-section recent-section">
+              {!isOfficial2025 && dashboardView === 'recent' && <section className="dashboard-section recent-section">
                 <div className="section-intro"><div><span className="eyebrow">Recent records</span><h2>Latest offer dates.</h2></div><Link className="text-link" to="/companies">All companies →</Link></div>
                 <div className="recent-company-list">
                   {dashboardVisuals.recentCompanies.map((company, index) => (
-                    <button key={company.id} type="button" onClick={() => { setSelectedCompany(company); navigate('/companies'); }}>
+                    <button key={company.id} type="button" onClick={() => { openCompanyDetail(company); navigate(`/companies?batch=${activeBatch.key}&company=${company.id}`); }}>
                       <span className="recent-index">{String(index + 1).padStart(2, '0')}</span>
                       <span className="company-monogram">{initialsFor(company.name)}</span>
                       <span className="recent-company-copy"><strong>{company.name}</strong><small>{company.role || company.type}</small></span>
@@ -2038,37 +2610,37 @@ const App = () => {
                   className="toolbar-disclosure"
                   contentClassName="toolbar-controls"
                 >
-                  {!isAggregateOnly && <div className="filter-group">
-                    <label>Opportunity</label>
+                  {!isAggregateOnly && <label className="filter-group">
+                    <span>Opportunity</span>
                     <select value={companyFilters.type} onChange={(e) => setCompanyFilters((f) => ({ ...f, type: e.target.value }))}>
                       <option value="">All</option>
-                      {OFFER_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+                      {OFFER_TYPES.map((type) => <option key={type} value={type}>{type} ({companyFilterCounts.types[type] || 0})</option>)}
                     </select>
-                  </div>}
-                  {!isAggregateOnly && <div className="filter-group">
-                    <label>Category</label>
+                  </label>}
+                  {!isAggregateOnly && <label className="filter-group">
+                    <span>Category</span>
                     <select value={companyFilters.category} onChange={(e) => setCompanyFilters((f) => ({ ...f, category: e.target.value }))}>
                       <option value="">All</option>
-                      <option value="A+">A+</option>
-                      <option value="A">A</option>
-                      <option value="B">B</option>
+                      <option value="A+">A+ ({companyFilterCounts.categories['A+'] || 0})</option>
+                      <option value="A">A ({companyFilterCounts.categories.A || 0})</option>
+                      <option value="B">B ({companyFilterCounts.categories.B || 0})</option>
                     </select>
-                  </div>}
-                  {!isAggregateOnly && <div className="filter-group">
-                    <label>Hiring branch</label>
+                  </label>}
+                  {!isAggregateOnly && <label className="filter-group">
+                    <span>Hiring branch</span>
                     <select value={companyFilters.branchGroup} onChange={(e) => setCompanyFilters((f) => ({ ...f, branchGroup: e.target.value }))}>
                       <option value="">All</option>
-                      <option value="CSE">CSE</option>
-                      <option value="ECE">ECE</option>
-                      <option value="CB">CB</option>
+                      <option value="CSE">CSE ({companyFilterCounts.branches.CSE || 0})</option>
+                      <option value="ECE">ECE ({companyFilterCounts.branches.ECE || 0})</option>
+                      <option value="CB">CB ({companyFilterCounts.branches.CB || 0})</option>
                     </select>
-                  </div>}
+                  </label>}
                   <label className="sort-control">Sort
                     <select value={companySort.field} onChange={(event) => setCompanySort({ field: event.target.value, asc: event.target.value === 'name' })}>
                       <option value="name">Company name</option><option value="ctc">Highest CTC</option><option value="stipend">Highest stipend</option><option value="totalHired">Most hires</option><option value="offer_date">Latest offer date</option>
                     </select>
                   </label>
-                  {(companySearch || Object.values(companyFilters).some(Boolean)) && <button type="button" className="secondary clear-filters-button" onClick={() => { setCompanySearch(''); setCompanyFilters({ type: '', category: '', branchGroup: '' }); }}>Clear filters</button>}
+                  {(companySearch || Object.values(companyFilters).some(Boolean)) && <button type="button" className="secondary clear-filters-button" onClick={() => { setCompanySearch(''); setCompanyFilters(DEFAULT_COMPANY_FILTERS); }}>Clear filters</button>}
                   {isAdmin && <button onClick={() => { setEditCompany(null); setShowCompanyModal(true); }}>Add company</button>}
                 </MobileDisclosure>
               </section>
@@ -2083,9 +2655,51 @@ const App = () => {
 
               <div className="directory-result-heading">
                 <div><span className="eyebrow">Opportunity catalogue</span><h2>{filteredCompanies.length} companies</h2>{dataUpdatedAt && <span className="data-updated-note" title={`Data as of ${formatDate(dataUpdatedAt)}`}>Updated {formatRelative(dataUpdatedAt)}</span>}</div>
-                <button type="button" className="text-button" onClick={() => setCompanySort((current) => ({ ...current, asc: !current.asc }))}>{companySort.asc ? 'Ascending' : 'Descending'} <SortIcon field={companySort.field} current={companySort} /></button>
+                <div className="result-actions">
+                  <div className="view-toggle" aria-label="Company view mode">
+                    <button type="button" className={companyView === 'cards' ? 'active' : ''} aria-pressed={companyView === 'cards'} onClick={() => setCompanyView('cards')}>Cards</button>
+                    <button type="button" className={companyView === 'table' ? 'active' : ''} aria-pressed={companyView === 'table'} onClick={() => setCompanyView('table')}>Table</button>
+                  </div>
+                  <button type="button" className="text-button" onClick={() => setCompanySort((current) => ({ ...current, asc: !current.asc }))}>{companySort.asc ? 'Ascending' : 'Descending'} <SortIcon field={companySort.field} current={companySort} /></button>
+                </div>
               </div>
 
+              {companyView === 'table' ? (
+                <section className="directory-table-wrap" aria-label="Company comparison table">
+                  <table className="directory-table">
+                    <thead>
+                      <tr>
+                        <th>Company</th>
+                        <th>Role</th>
+                        <th>Type</th>
+                        <th>Category</th>
+                        <th>CTC</th>
+                        <th>Stipend</th>
+                        <th>Hires</th>
+                        <th>Offer date</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredCompanies.map((company) => {
+                        const hiring = companyHiringStats[company.id] || { total: 0, reported: 0 };
+                        return (
+                          <tr key={company.id}>
+                            <td><button type="button" className="table-open-button" onClick={() => openCompanyDetail(company)}>{company.name}</button></td>
+                            <td>{company.role || '—'}</td>
+                            <td>{company.type || '—'}</td>
+                            <td><span className={`category-badge category-${String(company.category || 'other').toLowerCase().replace('+', 'plus')}`}>{company.category || '—'}</span></td>
+                            <td>{formatInr(company.ctc, 'p.a.')}</td>
+                            <td>{formatInr(company.stipend, 'p.m.')}</td>
+                            <td>{isAggregateOnly ? (hiring.reported || 0) : (hiring.total || hiring.reported || 0)}</td>
+                            <td>{formatDate(company.offer_date)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {!filteredCompanies.length && <div className="empty-directory-state"><h3>No companies found.</h3><p>{companySearch || Object.values(companyFilters).some(Boolean) ? 'No company matches the active filters.' : 'No company records are available for this cohort yet.'}</p>{(companySearch || Object.values(companyFilters).some(Boolean)) && <button type="button" className="secondary" onClick={() => { setCompanySearch(''); setCompanyFilters(DEFAULT_COMPANY_FILTERS); }}>Clear filters</button>}</div>}
+                </section>
+              ) : (
               <section className="company-card-grid">
                 {filteredCompanies.map((company) => {
                   const hiring = companyHiringStats[company.id] || { total: 0, reported: 0, CSE: 0, ECE: 0, CB: 0 };
@@ -2093,11 +2707,19 @@ const App = () => {
                   const categoryClass = String(company.category || 'other').toLowerCase().replace('+', 'plus');
                   return (
                     <article key={company.id} className={`company-card company-card-${categoryClass}`}>
-                      <button type="button" className="company-card-main" onClick={() => setSelectedCompany(company)}>
+                      <button type="button" className="company-card-main" onClick={() => openCompanyDetail(company)}>
                         <div className={`company-monogram company-monogram-${categoryClass}`}>{initialsFor(company.name)}</div>
                         <div className="company-card-copy">
                           <div className="company-card-kicker">
-                            {isAggregateOnly ? <><span>M.Tech CSE</span><span>{company.reported_offer_count || 0} reported offers</span></> : <><span>{company.type || 'Opportunity'}</span><span>{showReportedAggregate ? `${hiring.reported} reported CSE offers` : `Category ${company.category || '—'}`}</span></>}
+                            {isAggregateOnly ? (
+                              <><span>M.Tech CSE</span><span>{company.reported_offer_count || 0} reported offers</span></>
+                            ) : (
+                              <>
+                                <span>{company.type || 'Opportunity'}</span>
+                                <span className={`category-badge category-${categoryClass}`}>{company.category || '—'}</span>
+                                {showReportedAggregate && <span>{hiring.reported} reported CSE offers</span>}
+                              </>
+                            )}
                           </div>
                           <h3>{company.name}</h3>
                           <p>{company.role || 'Role details not recorded'}</p>
@@ -2131,8 +2753,9 @@ const App = () => {
                     </article>
                   );
                 })}
-                {!filteredCompanies.length && <div className="empty-directory-state"><h3>No companies found.</h3><p>Try widening the current search or filters.</p>{(companySearch || Object.values(companyFilters).some(Boolean)) && <button type="button" className="secondary" onClick={() => { setCompanySearch(''); setCompanyFilters({ type: '', category: '', branchGroup: '' }); }}>Clear filters</button>}</div>}
+                {!filteredCompanies.length && <div className="empty-directory-state"><h3>No companies found.</h3><p>{companySearch || Object.values(companyFilters).some(Boolean) ? 'No company matches the active filters.' : 'No company records are available for this cohort yet.'}</p>{(companySearch || Object.values(companyFilters).some(Boolean)) && <button type="button" className="secondary" onClick={() => { setCompanySearch(''); setCompanyFilters(DEFAULT_COMPANY_FILTERS); }}>Clear filters</button>}</div>}
               </section>
+              )}
 
               {/* Add/Edit Company Modal */}
               <Modal open={showCompanyModal} onClose={() => setShowCompanyModal(false)} label={editCompany ? 'Edit company' : 'Add company'}>
@@ -2145,18 +2768,26 @@ const App = () => {
               </Modal>
 
               {/* Company Detail Modal */}
-              <Modal open={!!selectedCompany} onClose={() => setSelectedCompany(null)} label={selectedCompany ? `${selectedCompany.name} details` : 'Company details'}>
+              <Modal open={!!selectedCompany} onClose={closeCompanyDetail} label={selectedCompany ? `${selectedCompany.name} details` : 'Company details'}>
                 {selectedCompany && (() => {
                   const stats = companyHiringStats[selectedCompany.id] || { total: 0, reported: 0, CSE: 0, ECE: 0, CB: 0, OTHER: 0, students: [] };
                   return (
                     <div className="company-detail">
                       <div className="detail-hero-row">
-                        <span className="company-monogram company-monogram-large">{initialsFor(selectedCompany.name)}</span>
+                        <span className={`company-monogram company-monogram-large company-monogram-${String(selectedCompany.category || 'other').toLowerCase().replace('+', 'plus')}`}>{initialsFor(selectedCompany.name)}</span>
                         <div>
-                          <span className="eyebrow">{selectedCompany.type || 'Opportunity'} · Category {selectedCompany.category || '—'}</span>
+                          <span className="detail-kicker">
+                            <span className="eyebrow">{selectedCompany.type || 'Opportunity'}</span>
+                            <span className={`category-badge category-${String(selectedCompany.category || 'other').toLowerCase().replace('+', 'plus')}`}>{selectedCompany.category || '—'}</span>
+                          </span>
                           <h2>{selectedCompany.name}</h2>
                           <p>{selectedCompany.role || 'Role details not recorded'}</p>
                         </div>
+                      </div>
+                      <div className="detail-action-row">
+                        <button type="button" className="secondary" onClick={() => moveSelectedCompany(-1)} disabled={filteredCompanies.length < 2}>Previous</button>
+                        <button type="button" className="secondary" onClick={() => moveSelectedCompany(1)} disabled={filteredCompanies.length < 2}>Next</button>
+                        <button type="button" className="secondary" onClick={copyCurrentLink}>Copy link</button>
                       </div>
                       <div className="info-grid">
                         {isAggregateOnly ? (
@@ -2188,9 +2819,19 @@ const App = () => {
                           <div className="value">{formatDate(selectedCompany.registration_deadline)}</div>
                         </div>
                         <div className="info-item">
+                          <div className="label">Registration opens</div>
+                          <div className="value">{formatDate(selectedCompany.registration_open_date)}</div>
+                        </div>
+                        <div className="info-item">
                           <div className="label">Offer date</div>
                           <div className="value">{formatDate(selectedCompany.offer_date)}</div>
                         </div>
+                        {selectedCompany.branches?.length > 0 && (
+                          <div className="info-item">
+                            <div className="label">Recruiting branches</div>
+                            <div className="value">{selectedCompany.branches.map(formatBranchToken).join(', ')}</div>
+                          </div>
+                        )}
                         {stats.reported > 0 && <div className="info-item">
                           <div className="label">Reported CSE offers</div>
                           <div className="value">{stats.reported}</div>
@@ -2228,6 +2869,35 @@ const App = () => {
                             ))}
                           </div>
                         </>
+                      )}
+                      {isAdmin && !isAggregateOnly && (
+                        <div className="company-add-offer" style={{ marginTop: 16, borderTop: '1px solid var(--border, #d8d8e0)', paddingTop: 12 }}>
+                          <h3 className="detail-section-title">Add offer</h3>
+                          <p style={{ fontSize: '0.85rem', opacity: 0.75, margin: '0 0 8px' }}>Search a student in the {activeCycle.year} cycle by name or roll number, then attach this company's offer.</p>
+                          <input type="text" placeholder="Search name or roll number…" value={offerSearch} onChange={(e) => { setOfferSearch(e.target.value); setOfferStudentId(''); }} style={{ width: '100%' }} />
+                          {offerSearch.trim() && !offerStudentId && (
+                            <div className="offer-candidate-list" style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6, maxHeight: 220, overflowY: 'auto' }}>
+                              {offerCandidates.length ? offerCandidates.map((s) => (
+                                <button key={s.id} type="button" className="secondary" style={{ justifyContent: 'flex-start', textAlign: 'left' }} onClick={() => { setOfferStudentId(String(s.id)); setOfferSearch(`${s.name} · ${s.roll_number}`); }}>
+                                  {s.name} · {s.roll_number}{s.degree ? ` · ${s.degree}` : ''}{s.program ? ` ${s.program}` : ''}
+                                </button>
+                              )) : <span style={{ fontSize: '0.85rem', opacity: 0.7 }}>No matching students in this cycle.</span>}
+                            </div>
+                          )}
+                          {offerStudentId && (
+                            <div className="flex-row" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                              <label>
+                                Offer type
+                                <select value={offerType || selectedCompany.type || ''} onChange={(e) => setOfferType(e.target.value)}>
+                                  {OFFER_TYPES.map((t) => <option key={t}>{t}</option>)}
+                                </select>
+                              </label>
+                              <button type="button" onClick={addCompanyOffer} disabled={offerBusy}>{offerBusy ? 'Adding…' : 'Add offer'}</button>
+                              <button type="button" className="secondary" onClick={resetOfferForm}>Clear</button>
+                            </div>
+                          )}
+                          {offerError && <p style={{ color: 'var(--danger, #c0392b)', fontSize: '0.85rem', marginTop: 6 }}>{offerError}</p>}
+                        </div>
                       )}
                     </div>
                   );
@@ -2285,37 +2955,37 @@ const App = () => {
                   className="toolbar-disclosure"
                   contentClassName="toolbar-controls"
                 >
-                  <div className="filter-group">
-                    <label>Branch group</label>
+                  <label className="filter-group">
+                    <span>Branch group</span>
                     <select value={studentFilters.branchGroup} onChange={(e) => setStudentFilters((f) => ({ ...f, branchGroup: e.target.value }))}>
                       <option value="">All</option>
-                      <option value="CSE">CSE</option>
-                      <option value="ECE">ECE</option>
-                      <option value="CB">CB</option>
+                      <option value="CSE">CSE ({studentFilterCounts.branches.CSE || 0})</option>
+                      <option value="ECE">ECE ({studentFilterCounts.branches.ECE || 0})</option>
+                      <option value="CB">CB ({studentFilterCounts.branches.CB || 0})</option>
                     </select>
-                  </div>
-                  <div className="filter-group">
-                    <label>Status</label>
+                  </label>
+                  <label className="filter-group">
+                    <span>Status</span>
                     <select value={studentFilters.status} onChange={(e) => setStudentFilters((f) => ({ ...f, status: e.target.value }))}>
                       <option value="">All</option>
                       {STUDENT_STATUS_OPTIONS.map((status) => (
-                        <option key={status} value={status}>{status}</option>
+                        <option key={status} value={status}>{status} ({studentFilterCounts.statuses[status] || 0})</option>
                       ))}
                     </select>
-                  </div>
-                  <div className="filter-group">
-                    <label>Offer type</label>
+                  </label>
+                  <label className="filter-group">
+                    <span>Offer type</span>
                     <select value={studentFilters.offerType} onChange={(e) => setStudentFilters((f) => ({ ...f, offerType: e.target.value }))}>
                       <option value="">All</option>
-                      {OFFER_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+                      {OFFER_TYPES.map((type) => <option key={type} value={type}>{type} ({studentFilterCounts.offerTypes[type] || 0})</option>)}
                     </select>
-                  </div>
+                  </label>
                   <label className="sort-control">Sort by
                     <select value={studentSort.field} onChange={(event) => { const field = event.target.value; setStudentSort({ field, asc: field === 'name' || field === 'roll_number' }); }}>
                       <option value="roll_number">Roll number</option><option value="name">Name</option><option value="ctc">Highest CTC</option><option value="stipend">Highest stipend</option><option value="offer_date">Latest offer</option>
                     </select>
                   </label>
-                  {(studentSearch || studentFilters.branchGroup || studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0) && <button type="button" className="secondary clear-filters-button" onClick={() => { setStudentSearch(''); setStudentFilters({ branchGroup: '', programs: [], status: '', offerType: '' }); }}>Clear filters</button>}
+                  {(studentSearch || studentFilters.branchGroup || studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0) && <button type="button" className="secondary clear-filters-button" onClick={() => { setStudentSearch(''); setStudentFilters(DEFAULT_STUDENT_FILTERS); }}>Clear filters</button>}
                   {isAdmin && <button onClick={() => { setEditStudent(null); setShowStudentModal(true); }}>Add student</button>}
                 </MobileDisclosure>
               </section>
@@ -2331,9 +3001,10 @@ const App = () => {
                           key={program}
                           type="button"
                           className={isSelected ? 'filter-chip active' : 'filter-chip'}
+                          aria-pressed={isSelected}
                           onClick={() => toggleProgramFilter(program)}
                         >
-                          {program}
+                          {program} <span className="chip-count">{studentFilterCounts.programs[program] || 0}</span>
                         </button>
                       );
                     })}
@@ -2357,9 +3028,54 @@ const App = () => {
 
               <div className="directory-result-heading student-result-heading">
                 <div><span className="eyebrow">Student directory</span><h2>{filteredStudents.length} visible records</h2>{dataUpdatedAt && <span className="data-updated-note" title={`Data as of ${formatDate(dataUpdatedAt)}`}>Updated {formatRelative(dataUpdatedAt)}</span>}</div>
-                <button type="button" className="text-button" onClick={() => setStudentSort((current) => ({ ...current, asc: !current.asc }))}>{studentSort.asc ? 'Ascending' : 'Descending'} <SortIcon field={studentSort.field} current={studentSort} /></button>
+                <div className="result-actions">
+                  <div className="view-toggle" aria-label="Student view mode">
+                    <button type="button" className={studentView === 'cards' ? 'active' : ''} aria-pressed={studentView === 'cards'} onClick={() => setStudentView('cards')}>List</button>
+                    <button type="button" className={studentView === 'table' ? 'active' : ''} aria-pressed={studentView === 'table'} onClick={() => setStudentView('table')}>Table</button>
+                  </div>
+                  <button type="button" className="text-button" onClick={() => setStudentSort((current) => ({ ...current, asc: !current.asc }))}>{studentSort.asc ? 'Ascending' : 'Descending'} <SortIcon field={studentSort.field} current={studentSort} /></button>
+                </div>
               </div>
 
+              {studentView === 'table' ? (
+                <section className="directory-table-wrap" aria-label="Student comparison table">
+                  <table className="directory-table">
+                    <thead>
+                      <tr>
+                        <th>Student</th>
+                        <th>Roll</th>
+                        <th>Program</th>
+                        <th>Status</th>
+                        <th>Company</th>
+                        <th>Offer type</th>
+                        <th>Best CTC</th>
+                        <th>Latest offer</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredStudents.map((student) => {
+                        const offers = getStudentOffers(student);
+                        const highestCtc = Math.max(...offers.map((offer) => Number(offer.ctc ?? offer.company_ctc) || 0), 0);
+                        const latestOffer = offers.map((offer) => offer.offer_date || offer.company_offer_date).filter(Boolean).sort((a, b) => new Date(b) - new Date(a))[0];
+                        const companyNames = offers.map((offer) => offer.company_name).filter(Boolean);
+                        return (
+                          <tr key={student.id}>
+                            <td><button type="button" className="table-open-button" onClick={() => openStudentDetail(student)}>{student.name}</button></td>
+                            <td>{student.roll_number}</td>
+                            <td>{student.program}</td>
+                            <td><StatusPill status={student.placement_status} /></td>
+                            <td>{companyNames.length ? companyNames.slice(0, 2).join(' · ') : '—'}</td>
+                            <td>{offers.map((offer) => offer.offer_type).filter(Boolean).join(' · ') || '—'}</td>
+                            <td>{formatInr(highestCtc || null, 'p.a.')}</td>
+                            <td>{formatDate(latestOffer)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {!filteredStudents.length && <div className="empty-directory-state"><h3>No student records found.</h3><p>{studentSearch || studentFilters.branchGroup || studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0 ? 'No student matches the active filters.' : 'No student records are available for this cohort yet.'}</p>{(studentSearch || studentFilters.branchGroup || studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0) && <button type="button" className="secondary" onClick={() => { setStudentSearch(''); setStudentFilters(DEFAULT_STUDENT_FILTERS); }}>Clear filters</button>}</div>}
+                </section>
+              ) : (
               <section className="student-directory-list">
                 {filteredStudents.map((student) => {
                   const offers = getStudentOffers(student);
@@ -2368,7 +3084,7 @@ const App = () => {
                   const statusClass = String(student.placement_status || 'unknown').toLowerCase().replace(/\s+/g, '-');
                   return (
                     <article key={student.id} className={`student-profile-row student-profile-${statusClass}`}>
-                      <button type="button" className="student-profile-main" onClick={() => setSelectedStudent(student)}>
+                      <button type="button" className="student-profile-main" onClick={() => openStudentDetail(student)}>
                         <span className="student-avatar">{initialsFor(student.name)}</span>
                         <span className="student-identity"><strong>{student.name}</strong><small>{student.roll_number} · {student.program}</small></span>
                         <StatusPill status={student.placement_status} />
@@ -2379,13 +3095,14 @@ const App = () => {
                         ) : <span className="no-offer-copy">No recorded offer yet</span>}
                       </div>
                       <div className="student-compensation"><span>Best recorded CTC</span><strong>{formatInr(highestCtc || null, 'p.a.')}</strong></div>
-                      <button type="button" className="row-open-button" aria-label={`Open ${student.name}`} onClick={() => setSelectedStudent(student)}>→</button>
+                      <button type="button" className="row-open-button" aria-label={`Open ${student.name}`} onClick={() => openStudentDetail(student)}>→</button>
                       {isAdmin && <div className="row-admin-actions"><button className="secondary" onClick={() => { setEditStudent(student); setShowStudentModal(true); }}>Edit</button><button className="danger-button" onClick={() => deleteStudentAction(student.id)}>Delete</button></div>}
                     </article>
                   );
                 })}
-                {!filteredStudents.length && <div className="empty-directory-state"><h3>No student records found.</h3><p>Try widening the current search or filters.</p>{(studentSearch || studentFilters.branchGroup || studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0) && <button type="button" className="secondary" onClick={() => { setStudentSearch(''); setStudentFilters({ branchGroup: '', programs: [], status: '', offerType: '' }); }}>Clear filters</button>}</div>}
+                {!filteredStudents.length && <div className="empty-directory-state"><h3>No student records found.</h3><p>{studentSearch || studentFilters.branchGroup || studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0 ? 'No student matches the active filters.' : 'No student records are available for this cohort yet.'}</p>{(studentSearch || studentFilters.branchGroup || studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0) && <button type="button" className="secondary" onClick={() => { setStudentSearch(''); setStudentFilters(DEFAULT_STUDENT_FILTERS); }}>Clear filters</button>}</div>}
               </section>
+              )}
 
               <Modal open={showStudentModal} onClose={() => setShowStudentModal(false)} label={editStudent ? 'Edit student' : 'Add student'}>
                 <h3>{editStudent ? 'Edit Student' : 'Add Student'}</h3>
@@ -2397,7 +3114,7 @@ const App = () => {
                 />
               </Modal>
 
-              <Modal open={!!selectedStudent} onClose={() => setSelectedStudent(null)} label={selectedStudent ? `${selectedStudent.name} details` : 'Student details'}>
+              <Modal open={!!selectedStudent} onClose={closeStudentDetail} label={selectedStudent ? `${selectedStudent.name} details` : 'Student details'}>
                 {selectedStudent && (() => {
                   const offers = getStudentOffers(selectedStudent);
                   return (
@@ -2405,6 +3122,11 @@ const App = () => {
                       <div className="detail-hero-row">
                         <span className="student-avatar student-avatar-large">{initialsFor(selectedStudent.name)}</span>
                         <div><span className="eyebrow">{selectedStudent.roll_number} · {selectedStudent.program}</span><h2>{selectedStudent.name}</h2><StatusPill status={selectedStudent.placement_status} /></div>
+                      </div>
+                      <div className="detail-action-row">
+                        <button type="button" className="secondary" onClick={() => moveSelectedStudent(-1)} disabled={filteredStudents.length < 2}>Previous</button>
+                        <button type="button" className="secondary" onClick={() => moveSelectedStudent(1)} disabled={filteredStudents.length < 2}>Next</button>
+                        <button type="button" className="secondary" onClick={copyCurrentLink}>Copy link</button>
                       </div>
                       <div className="offer-timeline">
                         {offers.length ? offers.map((offer, index) => (

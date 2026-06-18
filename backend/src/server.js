@@ -20,7 +20,10 @@ import {
   getStudent,
   initDb,
   listCompanies,
+  listCompaniesByCycle,
   listStudents,
+  listStudentsByCycle,
+  addOfferToStudent,
   setAppSettings,
   updateCompany,
   updateStudent,
@@ -296,7 +299,9 @@ app.use('/api/health', requireDbReady);
 // Company routes
 app.get('/api/companies', async (req, res) => {
   try {
-    const data = await listCompanies(resolveBatchKey(req.query.batch));
+    const data = req.query.cycle
+      ? await listCompaniesByCycle(Number(req.query.cycle))
+      : await listCompanies(resolveBatchKey(req.query.batch));
     res.json(data);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -341,7 +346,9 @@ app.delete('/api/companies/:id', authMiddleware, async (req, res) => {
 // Student routes
 app.get('/api/students', async (req, res) => {
   try {
-    const data = await listStudents(resolveBatchKey(req.query.batch));
+    const data = req.query.cycle
+      ? await listStudentsByCycle(Number(req.query.cycle))
+      : await listStudents(resolveBatchKey(req.query.batch));
     res.json(data);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -405,6 +412,32 @@ app.put('/api/students/:id', authMiddleware, async (req, res) => {
 app.delete('/api/students/:id', authMiddleware, async (req, res) => {
   await deleteStudent(req.params.id);
   res.status(204).end();
+});
+
+// Add a single offer to a student from a company's page. Offer type defaults to the
+// company's type but may be overridden per student; compensation/date defaults fall back
+// to the company's values when not provided.
+app.post('/api/offers', authMiddleware, async (req, res) => {
+  try {
+    const studentId = req.body?.student_id;
+    const companyId = req.body?.company_id;
+    if (!studentId || !companyId) return res.status(400).json({ message: 'student_id and company_id are required' });
+    const company = await getCompany(companyId);
+    if (!company) return res.status(400).json({ message: 'Company not found' });
+    const student = await getStudent(studentId);
+    if (!student) return res.status(404).json({ message: 'Student not found' });
+    const updated = await addOfferToStudent(studentId, {
+      company_id: companyId,
+      offer_type: req.body.offer_type || company.type || null,
+      ctc: req.body.ctc ?? company.ctc ?? null,
+      stipend: req.body.stipend ?? company.stipend ?? null,
+      registration_deadline: req.body.registration_deadline || company.registration_deadline || null,
+      offer_date: req.body.offer_date || company.offer_date || null,
+    });
+    res.status(201).json(updated);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
 });
 
 app.get('/api/stats', async (req, res) => {

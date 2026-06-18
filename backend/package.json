@@ -11,7 +11,9 @@
     "export:btech-2026-differences": "node scripts/export-btech-2026-differences.js",
     "import:btech-2027-summer": "node scripts/import-btech-2027-summer-internships.js",
     "import:batches": "node scripts/import-batches.js",
-    "import:btech-latest": "node scripts/import-btech-latest-placements.js"
+    "import:btech-latest": "node scripts/import-btech-latest-placements.js",
+    "fix:summer-intern-status": "node scripts/fix-summer-intern-placement-status.js",
+    "migrate:company-cycles": "node scripts/migrate-companies-to-cycles.js"
   },
   "dependencies": {
     "argon2": "^0.44.0",
