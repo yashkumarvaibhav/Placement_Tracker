@@ -442,7 +442,9 @@ app.post('/api/offers', authMiddleware, async (req, res) => {
 
 app.get('/api/stats', async (req, res) => {
   try {
-    const stats = await buildStats(resolveBatchKey(req.query.batch));
+    const stats = req.query.cycle
+      ? await buildStats(null, Number(req.query.cycle))
+      : await buildStats(resolveBatchKey(req.query.batch));
     res.json(stats);
   } catch (err) {
     console.error('Error fetching stats:', err.message);

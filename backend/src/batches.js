@@ -63,9 +63,26 @@ const CSE_PROGRAMS = new Set(['CSE', 'CSE-R', 'CSAI', 'CSAM', 'CSB', 'CSD', 'CSS
 const ECE_PROGRAMS = new Set(['ECE', 'EVE']);
 const CB_PROGRAMS = new Set(['CB']);
 
-export const getBatchConfig = (batchKey = DEFAULT_BATCH_KEY) => (
-  BATCHES.find((batch) => batch.key === batchKey) || BATCHES[0]
-);
+// A placement cycle = a graduation year spanning both degrees. `cycle-<year>` keys resolve to
+// a synthetic "Overall" config so the cycle can flow through the same batch-keyed plumbing.
+export const getCycleConfig = (graduationYear) => {
+  const batches = BATCHES.filter((batch) => batch.graduation_year === Number(graduationYear));
+  return {
+    key: `cycle-${graduationYear}`,
+    label: `${graduationYear} cycle`,
+    degree: 'Overall',
+    graduation_year: Number(graduationYear),
+    placements_only: batches.length > 0 && batches.every((batch) => batch.placements_only),
+    aggregate_only: batches.length > 0 && batches.every((batch) => batch.aggregate_only),
+  };
+};
+
+export const getBatchConfig = (batchKey = DEFAULT_BATCH_KEY) => {
+  if (typeof batchKey === 'string' && /^cycle-\d+$/.test(batchKey)) {
+    return getCycleConfig(Number(batchKey.slice('cycle-'.length)));
+  }
+  return BATCHES.find((batch) => batch.key === batchKey) || BATCHES[0];
+};
 
 export const getBranchGroup = (programRaw = '') => {
   const normalized = String(programRaw || '').trim().toUpperCase().replace(/\s+/g, '-');

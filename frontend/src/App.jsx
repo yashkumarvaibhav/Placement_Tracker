@@ -44,12 +44,17 @@ const companyRecruitsDegree = (company, degree) => {
 const DASHBOARD_VIEWS = new Set(['overview', 'official', 'tracker', 'programs', 'compensation', 'recent']);
 const DEFAULT_COMPANY_FILTERS = { type: '', category: '', branchGroup: '' };
 const DEFAULT_STUDENT_FILTERS = { branchGroup: '', programs: [], status: '', offerType: '' };
+const LATEST_CYCLE_KEY = `cycle-${Math.max(...BATCHES.map((batch) => batch.graduation_year))}`;
 const readInitialBatchKey = () => {
   const stored = localStorage.getItem('activeBatchKey');
-  return stored === 'mtech-cse-2025' ? 'mtech-2025' : stored || DEFAULT_BATCH_KEY;
+  if (stored === 'mtech-cse-2025') return 'mtech-2025';
+  return stored || LATEST_CYCLE_KEY;
 };
 
-const isKnownBatchKey = (key) => BATCHES.some((batch) => batch.key === key);
+const isKnownBatchKey = (key) => (
+  BATCHES.some((batch) => batch.key === key)
+  || (/^cycle-\d+$/.test(key || '') && BATCHES.some((batch) => `cycle-${batch.graduation_year}` === key))
+);
 const normalizeSortDirection = (value, fallback = true) => (value === 'desc' ? false : value === 'asc' ? true : fallback);
 const splitProgramsParam = (value) => (value ? value.split(',').map((item) => item.trim()).filter(Boolean) : []);
 const readDashboardView = (searchParams) => {
@@ -915,10 +920,13 @@ const App = () => {
   const viewerHeaders = useAdminHeaders(viewerToken);
   const isAdmin = !!token;
   const activeBatch = useMemo(() => getBatchConfig(activeBatchKey), [activeBatchKey]);
+  const isOverallScope = activeBatch.degree === 'Overall';
   const isAggregateOnly = !!activeBatch.aggregate_only;
   const isPlacementRecordsOnly = !!activeBatch.placements_only;
-  const isOfficial2025 = activeBatch.graduation_year === 2025 && isPlacementRecordsOnly;
-  const isOfficial2026 = activeBatch.graduation_year === 2026 && !isAggregateOnly;
+  // Official report overlays are degree-specific; the Overall (cycle) view uses the standard
+  // aggregate dashboard computed across both degrees.
+  const isOfficial2025 = !isOverallScope && activeBatch.graduation_year === 2025 && isPlacementRecordsOnly;
+  const isOfficial2026 = !isOverallScope && activeBatch.graduation_year === 2026 && !isAggregateOnly;
   const official2025Programs = OFFICIAL_2025.programs[activeBatch.degree] || [];
   const official2025AverageLpa = activeBatch.degree === 'B.Tech'
     ? OFFICIAL_2025.average_btech_lpa
@@ -1471,8 +1479,10 @@ const App = () => {
   const handleCycleChange = (year) => {
     const cycle = CYCLES.find((entry) => entry.year === year);
     if (!cycle) return;
-    const sameDegree = cycle.batches.find((batch) => batch.degree === activeBatch.degree);
-    handleBatchChange((sameDegree || cycle.batches[0]).key);
+    // Multi-degree cycles default to Overall (the cycle is the parent); single-degree cycles
+    // (e.g. the M.Tech-CSE aggregates) go straight to their one degree.
+    const key = cycle.batches.length >= 2 ? `cycle-${year}` : cycle.batches[0].key;
+    handleBatchChange(key);
   };
 
   const availablePrograms = useMemo(
@@ -1895,39 +1905,50 @@ const App = () => {
     const fetchData = async () => {
       try {
         await api.get('/ping', { signal: controller.signal });
-        const batchParams = {
-          params: { batch: batchKey },
-          headers: viewerHeaders.headers,
-          signal: controller.signal,
-        };
         const batchConfig = getBatchConfig(batchKey);
         const cycleParams = {
           params: { cycle: batchConfig.graduation_year },
           headers: viewerHeaders.headers,
           signal: controller.signal,
         };
-        const [statsRes, companyRes, studentRes, cycleStudentRes] = await Promise.all([
-          api.get('/stats', batchParams),
+        // Cycle-first: load the whole cycle once (Overall is the source of truth), then the
+        // active scope (Overall vs a degree) is a filter over that single dataset.
+        const [statsRes, companyRes, studentRes] = await Promise.all([
+          api.get('/stats', cycleParams),
           api.get('/companies', cycleParams),
-          api.get('/students', batchParams),
           api.get('/students', cycleParams),
         ]);
 
-        // Companies are cycle-scoped (cross-degree); the per-degree view shows only those
-        // recruiting this degree, keeping the dashboard unchanged for existing data.
-        const companiesForDegree = (companyRes.data || []).filter((company) => companyRecruitsDegree(company, batchConfig.degree));
+        const allStudents = studentRes.data || [];
+        const allCompanies = companyRes.data || [];
+        const cycleStats = statsRes.data || {};
+        const isOverall = batchConfig.degree === 'Overall';
+
+        const scopedStudents = isOverall ? allStudents : allStudents.filter((s) => s.degree === batchConfig.degree);
+        const scopedCompanies = isOverall ? allCompanies : allCompanies.filter((c) => companyRecruitsDegree(c, batchConfig.degree));
+        let scopedStats = cycleStats;
+        if (!isOverall && !batchConfig.aggregate_only) {
+          const withOffers = new Set();
+          scopedStudents.forEach((s) => (s.offers || []).forEach((o) => o.company_id && withOffers.add(String(o.company_id))));
+          scopedStats = {
+            ...cycleStats,
+            number_of_companies: scopedCompanies.filter((c) => withOffers.has(String(c.id))).length,
+            total_companies_listed: scopedCompanies.length,
+            available_programs: [...new Set(scopedStudents.map((s) => s.program).filter(Boolean))].sort(),
+          };
+        }
 
         const nextSnapshot = {
-          stats: statsRes.data,
-          companies: companiesForDegree,
-          students: studentRes.data,
+          stats: scopedStats,
+          companies: scopedCompanies,
+          students: scopedStudents,
         };
 
         if (!isCurrentRequest()) return;
         setStats(nextSnapshot.stats);
         setCompanies(nextSnapshot.companies);
         setStudents(nextSnapshot.students);
-        setCycleStudents(cycleStudentRes.data || []);
+        setCycleStudents(allStudents);
         writeBatchCache(batchKey, nextSnapshot);
         setLoadedBatchKey(batchKey);
         setDataUpdatedAt(new Date().toISOString());
@@ -2075,6 +2096,9 @@ const App = () => {
               <select value={activeBatch.key} onChange={(event) => handleBatchChange(event.target.value)}>
                 {CYCLES.map((cycle) => (
                   <optgroup key={cycle.year} label={`${cycle.year} cycle`}>
+                    {cycle.batches.length >= 2 && (
+                      <option value={`cycle-${cycle.year}`}>Overall</option>
+                    )}
                     {cycle.batches.map((batch) => (
                       <option key={batch.key} value={batch.key}>{batch.degree}{batch.academic_year ? ` · ${batch.academic_year}` : ''}</option>
                     ))}
@@ -2118,7 +2142,12 @@ const App = () => {
                   </button>
                 ))}
               </div>
-              <div className="batch-tabs" aria-label={`Degrees in the ${activeCycle.year} cycle`}>
+              <div className="batch-tabs" aria-label={`Views in the ${activeCycle.year} cycle`}>
+                {activeCycle.batches.length >= 2 && (
+                  <button type="button" className={activeBatch.key === `cycle-${activeCycle.year}` ? 'batch-tab active' : 'batch-tab'} aria-pressed={activeBatch.key === `cycle-${activeCycle.year}`} onClick={() => handleBatchChange(`cycle-${activeCycle.year}`)}>
+                    <span>Overall</span>
+                  </button>
+                )}
                 {activeCycle.batches.map((batch) => (
                   <button key={batch.key} type="button" className={activeBatch.key === batch.key ? 'batch-tab active' : 'batch-tab'} aria-pressed={activeBatch.key === batch.key} onClick={() => handleBatchChange(batch.key)}>
                     <span>{batch.degree}</span>{batch.academic_year ? <strong>{batch.academic_year}</strong> : null}

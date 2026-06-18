@@ -3,6 +3,7 @@ import dns from 'dns/promises';
 import {
   DEFAULT_BATCH_KEY,
   getBatchConfig,
+  getCycleConfig,
   getBranchGroup,
   normalizeBatchPayload,
 } from './batches.js';
@@ -586,10 +587,11 @@ export const deleteStudent = async (id) => {
   await query('DELETE FROM students WHERE id=$1', [id]);
 };
 
-export const buildStats = async (batchKey = DEFAULT_BATCH_KEY) => {
-  const batch = getBatchConfig(batchKey);
-  const companies = await listCompanies(batch.key);
-  const students = await listStudents(batch.key);
+export const buildStats = async (batchKey = DEFAULT_BATCH_KEY, graduationYear = null) => {
+  const cycle = graduationYear !== null;
+  const batch = cycle ? getCycleConfig(graduationYear) : getBatchConfig(batchKey);
+  const companies = cycle ? await listCompaniesByCycle(graduationYear) : await listCompanies(batch.key);
+  const students = cycle ? await listStudentsByCycle(graduationYear) : await listStudents(batch.key);
 
   if (batch.aggregate_only) {
     const totalOffers = companies.reduce((sum, company) => sum + (Number(company.reported_offer_count) || 0), 0);
