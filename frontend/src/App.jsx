@@ -384,8 +384,13 @@ const buildProgramSummaries = (students, placementsOnly = false) => {
     return { branchGroups: [], branchSummaries: { ALL: EMPTY_SLICE_SUMMARY }, programSummaries: [] };
   }
 
+  // In a mixed-degree set (the Overall/cycle view) programs are degree-qualified so that, e.g.,
+  // B.Tech CSE and M.Tech CSE are distinct rows; single-degree views keep the bare program code.
+  const mixedDegrees = new Set(students.map((student) => student.degree).filter(Boolean)).size > 1;
+  const programLabel = (student) => (mixedDegrees && student.degree ? `${student.degree} ${student.program}` : student.program);
+
   const offersWithProgram = students.flatMap((student) => (
-    getStudentOffers(student).map((offer) => ({ ...offer, program: student.program }))
+    getStudentOffers(student).map((offer) => ({ ...offer, program: student.program, programLabel: programLabel(student) }))
   ));
 
   const median = (values) => {
@@ -398,13 +403,13 @@ const buildProgramSummaries = (students, placementsOnly = false) => {
   const average = (values) => (values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null);
   const toPct = (value, total) => (total ? Number(((value / total) * 100).toFixed(2)) : 0);
 
-  const summarize = (subset, offerProgramFilter) => {
+  const summarize = (subset, offerPredicate) => {
     const total = subset.length;
     const placed = subset.filter((student) => student.placement_status === 'Placed').length;
     const placementEligibleTotal = subset.filter(isPlacementEligibleStudent).length;
     const excludedStudents = Math.max(total - placementEligibleTotal, 0);
     const unplacedStudents = Math.max(placementEligibleTotal - placed, 0);
-    const offersSubset = offersWithProgram.filter((offer) => offerProgramFilter(offer.program));
+    const offersSubset = offersWithProgram.filter(offerPredicate);
     const comboOffers = offersSubset.filter((offer) => isCombinedOfferType(offer.offer_type));
     const internOffers = offersSubset.filter((offer) => isInternshipOfferType(offer.offer_type) && !isCombinedOfferType(offer.offer_type));
     const fteOffers = offersSubset.filter((offer) => isFullTimeOfferType(offer.offer_type) && !isCombinedOfferType(offer.offer_type));
@@ -460,19 +465,37 @@ const buildProgramSummaries = (students, placementsOnly = false) => {
     ...accumulator,
     [branchGroup]: summarize(
       students.filter((student) => getBranchGroup(student.program) === branchGroup),
-      (offerProgram) => getBranchGroup(offerProgram) === branchGroup
+      (offer) => getBranchGroup(offer.program) === branchGroup
     ),
   }), {
     ALL: summarize(students, () => true),
   });
 
+  const labelInfo = new Map();
+  students.forEach((student) => {
+    const label = programLabel(student);
+    if (!labelInfo.has(label)) labelInfo.set(label, { program: student.program, degree: student.degree });
+  });
+  const programLabels = [...labelInfo.keys()].sort((left, right) => {
+    const li = labelInfo.get(left);
+    const ri = labelInfo.get(right);
+    const lg = BRANCH_GROUP_ORDER[getBranchGroup(li.program)] ?? 99;
+    const rg = BRANCH_GROUP_ORDER[getBranchGroup(ri.program)] ?? 99;
+    if (lg !== rg) return lg - rg;
+    if ((li.degree || '') !== (ri.degree || '')) return (li.degree || '').localeCompare(ri.degree || '');
+    return li.program.localeCompare(ri.program);
+  });
+
   return {
     branchGroups,
     branchSummaries,
-    programSummaries: programs.map((program) => ({
-      program,
-      branchGroup: getBranchGroup(program),
-      summary: summarize(students.filter((student) => student.program === program), (offerProgram) => offerProgram === program),
+    programSummaries: programLabels.map((label) => ({
+      program: label,
+      branchGroup: getBranchGroup(labelInfo.get(label).program),
+      summary: summarize(
+        students.filter((student) => programLabel(student) === label),
+        (offer) => offer.programLabel === label
+      ),
     })),
   };
 };
