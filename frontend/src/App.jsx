@@ -604,6 +604,17 @@ const CompanyForm = ({ initial = {}, onSubmit, onCancel }) => {
     });
   };
 
+  const setDegreeBranches = (degree, branches, selectAll) => {
+    setForm((f) => {
+      const set = new Set(f.branches || []);
+      branches.forEach((branch) => {
+        const token = branchToken(degree, branch);
+        if (selectAll) set.add(token); else set.delete(token);
+      });
+      return { ...f, branches: [...set] };
+    });
+  };
+
   const updateRole = (idx, key, value) => setForm((f) => {
     const roles = [...(f.roles || [])];
     roles[idx] = { ...roles[idx], [key]: value };
@@ -714,9 +725,17 @@ const CompanyForm = ({ initial = {}, onSubmit, onCancel }) => {
       </fieldset>
       <fieldset className="branch-multiselect" style={{ border: '1px solid var(--border, #d8d8e0)', borderRadius: 10, padding: 12, marginTop: 12 }}>
         <legend>Recruiting branches</legend>
-        {BRANCH_OPTIONS.map(({ degree, branches }) => (
+        {BRANCH_OPTIONS.map(({ degree, branches }) => {
+          const allSelected = branches.every((branch) => (form.branches || []).includes(branchToken(degree, branch)));
+          return (
           <div key={degree} style={{ marginBottom: 8 }}>
-            <strong style={{ display: 'block', marginBottom: 4 }}>{degree}</strong>
+            <div className="flex-row" style={{ gap: 10, marginBottom: 4, alignItems: 'center' }}>
+              <strong>{degree}</strong>
+              <label className="checkbox-row" style={{ gap: 4 }}>
+                <input type="checkbox" checked={allSelected} onChange={(e) => setDegreeBranches(degree, branches, e.target.checked)} />
+                <span>Select all</span>
+              </label>
+            </div>
             <div className="flex-row" style={{ flexWrap: 'wrap', gap: 10 }}>
               {branches.map((branch) => {
                 const token = branchToken(degree, branch);
@@ -729,7 +748,8 @@ const CompanyForm = ({ initial = {}, onSubmit, onCancel }) => {
               })}
             </div>
           </div>
-        ))}
+          );
+        })}
       </fieldset>
       <div className="flex-row" style={{ justifyContent: 'flex-end', marginTop: 8 }}>
         <button type="button" className="secondary" onClick={onCancel}>Cancel</button>
