@@ -572,12 +572,14 @@ const Modal = ({ open, onClose, label = 'Dialog', children }) => {
 };
 
 const CompanyForm = ({ initial = {}, onSubmit, onCancel }) => {
+  const initialRoles = initial.roles?.length
+    ? initial.roles
+    : (initial.role || initial.type || initial.ctc != null || initial.stipend != null)
+      ? [{ role: initial.role || '', degree: 'All', offer_type: initial.type || 'FTE', ctc: initial.ctc ?? '', stipend: initial.stipend ?? '' }]
+      : [{ role: '', degree: 'All', offer_type: 'FTE', ctc: '', stipend: '' }];
+
   const [form, setForm] = useState({
     name: '',
-    role: '',
-    type: 'FTE',
-    ctc: '',
-    stipend: '',
     category: '',
     eligible_cgpa: '',
     backlog_allowed: false,
@@ -586,6 +588,7 @@ const CompanyForm = ({ initial = {}, onSubmit, onCancel }) => {
     offer_date: '',
     branches: [],
     ...initial,
+    roles: initialRoles,
   });
 
   const handleChange = (e) => {
@@ -601,14 +604,35 @@ const CompanyForm = ({ initial = {}, onSubmit, onCancel }) => {
     });
   };
 
+  const updateRole = (idx, key, value) => setForm((f) => {
+    const roles = [...(f.roles || [])];
+    roles[idx] = { ...roles[idx], [key]: value };
+    return { ...f, roles };
+  });
+  const addRole = () => setForm((f) => ({ ...f, roles: [...(f.roles || []), { role: '', degree: 'All', offer_type: 'FTE', ctc: '', stipend: '' }] }));
+  const removeRole = (idx) => setForm((f) => ({ ...f, roles: (f.roles || []).filter((_, i) => i !== idx) }));
+
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
+        const normalizedRoles = (form.roles || [])
+          .filter((r) => (r.role || '').trim() || r.offer_type || r.ctc || r.stipend)
+          .map((r) => ({
+            role: (r.role || '').trim(),
+            degree: r.degree || 'All',
+            offer_type: r.offer_type || null,
+            ctc: r.ctc ? Number(r.ctc) : null,
+            stipend: r.stipend ? Number(r.stipend) : null,
+          }));
+        const primary = normalizedRoles[0] || {};
         onSubmit({
           ...form,
-          ctc: form.ctc ? Number(form.ctc) : null,
-          stipend: form.stipend ? Number(form.stipend) : null,
+          roles: normalizedRoles,
+          role: primary.role || '',
+          type: primary.offer_type || 'FTE',
+          ctc: primary.ctc ?? null,
+          stipend: primary.stipend ?? null,
           eligible_cgpa: form.eligible_cgpa ? Number(form.eligible_cgpa) : null,
         });
       }}
@@ -617,24 +641,6 @@ const CompanyForm = ({ initial = {}, onSubmit, onCancel }) => {
         <label>
           Name
           <input name="name" value={form.name} onChange={handleChange} required />
-        </label>
-        <label>
-          Role
-          <input name="role" value={form.role} onChange={handleChange} />
-        </label>
-        <label>
-          Type
-          <select name="type" value={form.type} onChange={handleChange}>
-            {OFFER_TYPES.map((type) => <option key={type}>{type}</option>)}
-          </select>
-        </label>
-        <label>
-          CTC (₹ per annum)
-          <input name="ctc" type="number" min="0" step="any" placeholder="e.g. 1200000" value={form.ctc ?? ''} onChange={handleChange} />
-        </label>
-        <label>
-          Stipend (₹ per month)
-          <input name="stipend" type="number" min="0" step="any" placeholder="e.g. 50000" value={form.stipend ?? ''} onChange={handleChange} />
         </label>
         <label>
           Category
@@ -669,6 +675,43 @@ const CompanyForm = ({ initial = {}, onSubmit, onCancel }) => {
           <input name="offer_date" type="date" value={form.offer_date || ''} onChange={handleChange} />
         </label>
       </div>
+      <fieldset className="role-packages" style={{ border: '1px solid var(--border, #d8d8e0)', borderRadius: 10, padding: 12, marginTop: 12 }}>
+        <legend>Roles &amp; packages</legend>
+        <p style={{ fontSize: '0.85rem', opacity: 0.75, margin: '0 0 8px' }}>One row per role. Use "Applies to" to set different salaries for B.Tech vs M.Tech (or All).</p>
+        {(form.roles || []).map((pkg, idx) => (
+          <div key={idx} className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px,1fr))', gap: 8, marginBottom: 8, alignItems: 'end' }}>
+            <label>
+              Role
+              <input value={pkg.role || ''} onChange={(e) => updateRole(idx, 'role', e.target.value)} placeholder="e.g. SDE" />
+            </label>
+            <label>
+              Applies to
+              <select value={pkg.degree || 'All'} onChange={(e) => updateRole(idx, 'degree', e.target.value)}>
+                {['All', 'B.Tech', 'M.Tech'].map((d) => <option key={d}>{d}</option>)}
+              </select>
+            </label>
+            <label>
+              Offer Type
+              <select value={pkg.offer_type || ''} onChange={(e) => updateRole(idx, 'offer_type', e.target.value)}>
+                <option value="">Select</option>
+                {OFFER_TYPES.map((t) => <option key={t}>{t}</option>)}
+              </select>
+            </label>
+            <label>
+              CTC (₹ p.a.)
+              <input type="number" min="0" step="any" value={pkg.ctc ?? ''} onChange={(e) => updateRole(idx, 'ctc', e.target.value)} />
+            </label>
+            <label>
+              Stipend (₹ p.m.)
+              <input type="number" min="0" step="any" value={pkg.stipend ?? ''} onChange={(e) => updateRole(idx, 'stipend', e.target.value)} />
+            </label>
+            {(form.roles || []).length > 1 && (
+              <button type="button" className="secondary" onClick={() => removeRole(idx)}>Remove</button>
+            )}
+          </div>
+        ))}
+        <button type="button" className="secondary" onClick={addRole}>Add role</button>
+      </fieldset>
       <fieldset className="branch-multiselect" style={{ border: '1px solid var(--border, #d8d8e0)', borderRadius: 10, padding: 12, marginTop: 12 }}>
         <legend>Recruiting branches</legend>
         {BRANCH_OPTIONS.map(({ degree, branches }) => (
@@ -774,7 +817,7 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
     });
   };
 
-  const addOffer = () => setForm((prev) => ({ ...prev, offers: [...(prev.offers || []), { company_id: '', offer_type: '', ctc: '', stipend: '', registration_deadline: '', offer_date: '' }] }));
+  const addOffer = () => setForm((prev) => ({ ...prev, offers: [...(prev.offers || []), { company_id: '', offer_type: '', role: '', ctc: '', stipend: '', registration_deadline: '', offer_date: '' }] }));
   const removeOffer = (idx) => setForm((prev) => ({ ...prev, offers: (prev.offers || []).filter((_, i) => i !== idx) }));
 
   return (
@@ -886,6 +929,10 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
                     {offerTypeOptions.map((type) => <option key={type}>{type}</option>)}
                   </select>
                 </label>
+                <label>
+                  Role
+                  <input value={offer.role || ''} onChange={(e) => updateOfferField(idx, 'role', e.target.value)} placeholder="e.g. SDE" />
+                </label>
                 {placed && (
                   <label>
                     CTC (₹ per annum)
@@ -972,6 +1019,9 @@ const App = () => {
   const [offerSearch, setOfferSearch] = useState('');
   const [offerStudentId, setOfferStudentId] = useState('');
   const [offerType, setOfferType] = useState('');
+  const [offerRole, setOfferRole] = useState('');
+  const [offerCtc, setOfferCtc] = useState('');
+  const [offerStipend, setOfferStipend] = useState('');
   const [offerBusy, setOfferBusy] = useState(false);
   const [offerError, setOfferError] = useState('');
   const [loading, setLoading] = useState(!initialSnapshot);
@@ -1425,6 +1475,9 @@ const App = () => {
     setOfferSearch('');
     setOfferStudentId('');
     setOfferType('');
+    setOfferRole('');
+    setOfferCtc('');
+    setOfferStipend('');
     setOfferError('');
   };
 
@@ -1448,6 +1501,22 @@ const App = () => {
       .slice(0, 8);
   }, [offerSearch, offerStudentId, cycleStudents]);
 
+  const offerStudent = useMemo(
+    () => cycleStudents.find((s) => String(s.id) === String(offerStudentId)) || null,
+    [cycleStudents, offerStudentId]
+  );
+  // Company role packages applicable to the chosen student (their degree or "All").
+  const offerPackages = useMemo(
+    () => (selectedCompany?.roles || []).filter((p) => !p.degree || p.degree === 'All' || p.degree === offerStudent?.degree),
+    [selectedCompany, offerStudent]
+  );
+  const applyOfferPackage = (pkg) => {
+    setOfferRole(pkg.role || '');
+    setOfferType(pkg.offer_type || '');
+    setOfferCtc(pkg.ctc ?? '');
+    setOfferStipend(pkg.stipend ?? '');
+  };
+
   const addCompanyOffer = async () => {
     if (!isAdmin || !selectedCompany || !offerStudentId) return;
     setOfferBusy(true);
@@ -1457,6 +1526,9 @@ const App = () => {
         student_id: Number(offerStudentId),
         company_id: selectedCompany.id,
         offer_type: offerType || selectedCompany.type || null,
+        role: offerRole || null,
+        ctc: offerCtc ? Number(offerCtc) : null,
+        stipend: offerStipend ? Number(offerStipend) : null,
       }, authHeaders);
       resetOfferForm();
       refresh();
@@ -2892,6 +2964,19 @@ const App = () => {
                         )}
                       </div>
 
+                      {selectedCompany.roles?.length > 0 && (
+                        <>
+                          <h3 className="detail-section-title">Roles &amp; packages</h3>
+                          <div className="info-grid">
+                            {selectedCompany.roles.map((pkg, i) => (
+                              <div className="info-item" key={i}>
+                                <div className="label">{pkg.role || pkg.offer_type || 'Role'}{pkg.degree && pkg.degree !== 'All' ? ` · ${pkg.degree}` : ''}</div>
+                                <div className="value">{[pkg.offer_type, pkg.ctc ? formatInr(pkg.ctc, 'p.a.') : null, pkg.stipend ? formatInr(pkg.stipend, 'p.m.') : null].filter(Boolean).join(' · ') || '—'}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      )}
                       <h3 className="detail-section-title">{isAggregateOnly ? 'Reported aggregate' : 'Hiring footprint'}</h3>
                       <div className="hiring-stats">
                         <div className="hiring-stat">
@@ -2937,15 +3022,39 @@ const App = () => {
                             </div>
                           )}
                           {offerStudentId && (
-                            <div className="flex-row" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                              <label>
-                                Offer type
-                                <select value={offerType || selectedCompany.type || ''} onChange={(e) => setOfferType(e.target.value)}>
-                                  {OFFER_TYPES.map((t) => <option key={t}>{t}</option>)}
-                                </select>
-                              </label>
-                              <button type="button" onClick={addCompanyOffer} disabled={offerBusy}>{offerBusy ? 'Adding…' : 'Add offer'}</button>
-                              <button type="button" className="secondary" onClick={resetOfferForm}>Clear</button>
+                            <div style={{ marginTop: 8 }}>
+                              {offerPackages.length > 0 && (
+                                <div className="flex-row" style={{ flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                                  <span style={{ fontSize: '0.85rem', opacity: 0.7, alignSelf: 'center' }}>Quick-fill package:</span>
+                                  {offerPackages.map((pkg, i) => (
+                                    <button key={i} type="button" className="secondary" onClick={() => applyOfferPackage(pkg)}>
+                                      {(pkg.role || pkg.offer_type || 'Role')}{pkg.degree && pkg.degree !== 'All' ? ` · ${pkg.degree}` : ''}{pkg.ctc ? ` · ${formatInr(pkg.ctc, 'p.a.')}` : pkg.stipend ? ` · ${formatInr(pkg.stipend, 'p.m.')}` : ''}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="flex-row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                                <label>
+                                  Role
+                                  <input value={offerRole} onChange={(e) => setOfferRole(e.target.value)} placeholder={selectedCompany.role || 'Role'} />
+                                </label>
+                                <label>
+                                  Offer type
+                                  <select value={offerType || selectedCompany.type || ''} onChange={(e) => setOfferType(e.target.value)}>
+                                    {OFFER_TYPES.map((t) => <option key={t}>{t}</option>)}
+                                  </select>
+                                </label>
+                                <label>
+                                  CTC (₹ p.a.)
+                                  <input type="number" min="0" step="any" value={offerCtc} onChange={(e) => setOfferCtc(e.target.value)} />
+                                </label>
+                                <label>
+                                  Stipend (₹ p.m.)
+                                  <input type="number" min="0" step="any" value={offerStipend} onChange={(e) => setOfferStipend(e.target.value)} />
+                                </label>
+                                <button type="button" onClick={addCompanyOffer} disabled={offerBusy}>{offerBusy ? 'Adding…' : 'Add offer'}</button>
+                                <button type="button" className="secondary" onClick={resetOfferForm}>Clear</button>
+                              </div>
                             </div>
                           )}
                           {offerError && <p style={{ color: 'var(--danger, #c0392b)', fontSize: '0.85rem', marginTop: 6 }}>{offerError}</p>}
