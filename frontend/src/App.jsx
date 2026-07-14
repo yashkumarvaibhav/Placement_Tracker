@@ -782,6 +782,8 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
     ...initial,
   });
   const studentProgramOptions = [...new Set([...PROGRAM_OPTIONS, form.program].filter(Boolean))];
+  const [submitError, setSubmitError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -842,8 +844,9 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
 
   return (
     <form
-      onSubmit={(e) => {
+      onSubmit={async (e) => {
         e.preventDefault();
+        setSubmitError('');
 
         const normalizedOffers = (form.offers || []).map((o) => ({
           ...o,
@@ -858,16 +861,23 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
         const submitOffers = isPlaced
           ? normalizedOffers
           : normalizedOffers.filter((o) => !isPlacementQualifyingOfferType(o.offer_type));
-        onSubmit({
-          ...form,
-          offers: submitOffers,
-          company_id: isPlaced ? form.company_id : null,
-          offer_type: isPlaced ? form.offer_type : null,
-          ctc: isPlaced ? form.ctc : null,
-          stipend: isPlaced ? form.stipend : null,
-          registration_deadline: isPlaced ? form.registration_deadline : null,
-          offer_date: isPlaced ? form.offer_date : null,
-        });
+        setSubmitting(true);
+        try {
+          await onSubmit({
+            ...form,
+            offers: submitOffers,
+            company_id: isPlaced ? form.company_id : null,
+            offer_type: isPlaced ? form.offer_type : null,
+            ctc: isPlaced ? form.ctc : null,
+            stipend: isPlaced ? form.stipend : null,
+            registration_deadline: isPlaced ? form.registration_deadline : null,
+            offer_date: isPlaced ? form.offer_date : null,
+          });
+        } catch (err) {
+          setSubmitError(err?.response?.data?.message || 'Could not save. Please check the details and try again.');
+        } finally {
+          setSubmitting(false);
+        }
       }}
     >
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px,1fr))' }}>
@@ -982,9 +992,10 @@ const StudentForm = ({ initial = {}, companies = [], onSubmit, onCancel }) => {
           <button type="button" className="secondary" onClick={addOffer}>{placed ? 'Add Another Offer' : 'Add Summer Internship'}</button>
         </div>
       </div>
+      {submitError && <p className="error-text" role="alert" style={{ marginTop: 8, textAlign: 'right' }}>{submitError}</p>}
       <div className="flex-row" style={{ justifyContent: 'flex-end', marginTop: 8 }}>
-        <button type="button" className="secondary" onClick={onCancel}>Cancel</button>
-        <button type="submit">Save</button>
+        <button type="button" className="secondary" onClick={onCancel} disabled={submitting}>Cancel</button>
+        <button type="submit" disabled={submitting}>{submitting ? 'Saving…' : 'Save'}</button>
       </div>
     </form>
   );
@@ -2119,12 +2130,23 @@ const App = () => {
     graduation_year: activeBatch.graduation_year,
   };
 
+  // The Overall view is a synthetic cross-degree scope; its `cycle-<year>` key must never be
+  // written onto a record — it fails the backend's company batch check and would clobber the
+  // record's real B.Tech/M.Tech identity. When editing from that scope keep the record's own
+  // batch; otherwise use the active batch.
+  const resolveRecordBatch = (record) => (
+    isOverallScope && record?.batch_key
+      ? { batch_key: record.batch_key, degree: record.degree, graduation_year: record.graduation_year }
+      : batchPayload
+  );
+
   const saveCompany = async (payload) => {
     if (!isAdmin) return;
+    const recordBatch = resolveRecordBatch(editCompany);
     if (editCompany) {
-      await api.put(`/companies/${editCompany.id}`, { ...payload, ...batchPayload }, authHeaders);
+      await api.put(`/companies/${editCompany.id}`, { ...payload, ...recordBatch }, authHeaders);
     } else {
-      await api.post('/companies', { ...payload, ...batchPayload }, authHeaders);
+      await api.post('/companies', { ...payload, ...recordBatch }, authHeaders);
     }
     setShowCompanyModal(false);
     setEditCompany(null);
@@ -2139,10 +2161,11 @@ const App = () => {
 
   const saveStudent = async (payload) => {
     if (!isAdmin) return;
+    const recordBatch = resolveRecordBatch(editStudent);
     if (editStudent) {
-      await api.put(`/students/${editStudent.id}`, { ...payload, ...batchPayload }, authHeaders);
+      await api.put(`/students/${editStudent.id}`, { ...payload, ...recordBatch }, authHeaders);
     } else {
-      await api.post('/students', { ...payload, ...batchPayload }, authHeaders);
+      await api.post('/students', { ...payload, ...recordBatch }, authHeaders);
     }
     setShowStudentModal(false);
     setEditStudent(null);
@@ -2785,7 +2808,9 @@ const App = () => {
                     </select>
                   </label>
                   {(companySearch || Object.values(companyFilters).some(Boolean)) && <button type="button" className="secondary clear-filters-button" onClick={() => { setCompanySearch(''); setCompanyFilters(DEFAULT_COMPANY_FILTERS); }}>Clear filters</button>}
-                  {isAdmin && <button onClick={() => { setEditCompany(null); setShowCompanyModal(true); }}>Add company</button>}
+                  {isAdmin && (isOverallScope
+                    ? <span className="subtext add-scope-hint" title="The Overall view spans both degrees">Switch to a specific batch (B.Tech / M.Tech) to add a company</span>
+                    : <button onClick={() => { setEditCompany(null); setShowCompanyModal(true); }}>Add company</button>)}
                 </MobileDisclosure>
               </section>
 
@@ -3167,7 +3192,9 @@ const App = () => {
                     </select>
                   </label>
                   {(studentSearch || studentFilters.branchGroup || studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0) && <button type="button" className="secondary clear-filters-button" onClick={() => { setStudentSearch(''); setStudentFilters(DEFAULT_STUDENT_FILTERS); }}>Clear filters</button>}
-                  {isAdmin && <button onClick={() => { setEditStudent(null); setShowStudentModal(true); }}>Add student</button>}
+                  {isAdmin && (isOverallScope
+                    ? <span className="subtext add-scope-hint" title="The Overall view spans both degrees">Switch to a specific batch (B.Tech / M.Tech) to add a student</span>
+                    : <button onClick={() => { setEditStudent(null); setShowStudentModal(true); }}>Add student</button>)}
                 </MobileDisclosure>
               </section>
 
