@@ -2267,8 +2267,12 @@ const App = () => {
 
   const deleteCompanyAction = async (id) => {
     if (!isAdmin) return;
-    await api.delete(`/companies/${id}`, authHeaders);
-    refresh();
+    try {
+      await api.delete(`/companies/${id}`, authHeaders);
+      refresh();
+    } catch (err) {
+      window.alert(err.response?.data?.message || err.message);
+    }
   };
 
   const saveStudent = async (payload) => {
@@ -2286,8 +2290,12 @@ const App = () => {
 
   const deleteStudentAction = async (id) => {
     if (!isAdmin) return;
-    await api.delete(`/students/${id}`, authHeaders);
-    refresh();
+    try {
+      await api.delete(`/students/${id}`, authHeaders);
+      refresh();
+    } catch (err) {
+      window.alert(err.response?.data?.message || err.message);
+    }
   };
 
   const adminRoute = (element) => {

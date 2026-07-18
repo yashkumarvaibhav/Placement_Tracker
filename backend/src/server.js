@@ -9,6 +9,7 @@ import argon2 from 'argon2';
 import { BATCHES, getBatchConfig } from './batches.js';
 import {
   buildStats,
+  countCompanyReferences,
   createCompany,
   createStudent,
   deleteCompany,
@@ -482,9 +483,21 @@ app.put('/api/companies/:id', authMiddleware, async (req, res) => {
   }
 });
 
-app.delete('/api/companies/:id', authMiddleware, async (req, res) => {
-  await deleteCompany(req.params.id);
-  res.status(204).end();
+app.delete('/api/companies/:id', authMiddleware, async (req, res, next) => {
+  try {
+    const refs = await countCompanyReferences(req.params.id);
+    if (refs.offers || refs.students) {
+      const parts = [
+        refs.offers ? `${refs.offers} student offer${refs.offers === 1 ? '' : 's'}` : null,
+        refs.students ? `${refs.students} student record${refs.students === 1 ? '' : 's'}` : null,
+      ].filter(Boolean).join(' and ');
+      return res.status(409).json({ message: `Cannot delete this company: ${parts} still reference it. Remove those offers first.` });
+    }
+    await deleteCompany(req.params.id);
+    return res.status(204).end();
+  } catch (err) {
+    return next(err);
+  }
 });
 
 // Student routes
@@ -561,9 +574,13 @@ app.put('/api/students/:id', authMiddleware, async (req, res) => {
   }
 });
 
-app.delete('/api/students/:id', authMiddleware, async (req, res) => {
-  await deleteStudent(req.params.id);
-  res.status(204).end();
+app.delete('/api/students/:id', authMiddleware, async (req, res, next) => {
+  try {
+    await deleteStudent(req.params.id);
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
 });
 
 // Add a single offer to a student from a company's page. Offer type defaults to the
@@ -648,6 +665,20 @@ app.use('/api', (_req, res) => {
   res.status(404).json({ message: 'API route not found.' });
 });
 
+// Last-resort API error handler: maps common Postgres constraint violations to client errors
+// and keeps everything else a logged 500 instead of an unhandled rejection.
+// eslint-disable-next-line no-unused-vars
+app.use('/api', (err, _req, res, _next) => {
+  console.error('[API] Unhandled route error:', err);
+  if (err?.code === '23503') {
+    return res.status(409).json({ message: 'This record is still referenced by other records and cannot be changed this way.' });
+  }
+  if (err?.code === '23505') {
+    return res.status(409).json({ message: 'A record with these details already exists.' });
+  }
+  return res.status(500).json({ message: 'Unexpected server error.' });
+});
+
 app.use('/Placement_Tracker', (req, res) => {
   const suffix = req.originalUrl.replace(/^\/Placement_Tracker\/?/, '/');
   res.redirect(308, `https://${PLACEMENT_ATLAS_HOST}${suffix}`);
@@ -665,6 +696,15 @@ app.use((req, res, next) => {
 app.use(express.static(portfolioDistPath));
 app.get('*', (_req, res) => {
   res.sendFile(path.join(portfolioDistPath, 'index.html'));
+});
+
+// This deployment runs as a bare `node` process with no supervisor, so an escaped rejection
+// or exception must not take the site down for everyone. Log loudly and keep serving.
+process.on('unhandledRejection', (reason) => {
+  console.error('[FATAL-ish] Unhandled promise rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL-ish] Uncaught exception:', err);
 });
 
 const start = async () => {
