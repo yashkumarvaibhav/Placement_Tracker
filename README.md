@@ -48,3 +48,13 @@ npm run dev             # http://localhost:5173/
 ## Admin login
 - `yash25091@iiitd.ac.in` automatically receives admin access after a successful IIIT Delhi Google sign-in.
 - There is no separate admin password or TOTP login endpoint.
+
+## Placement Calendar
+- The admin-only Placement Calendar lives at `/#/admin/calendar`.
+- Connect Google Sheets through OAuth from that page. The backend stores the Google refresh token encrypted with `PLACEMENT_CALENDAR_TOKEN_SECRET` or `SESSION_SECRET`; it is never sent to the frontend.
+- Configure `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and the authorized redirect URI `https://placement-atlas.yashkumarvaibhav.me/api/admin/calendar/oauth/callback`.
+- The source spreadsheet defaults to `1FqgXNGWUUa5uHRYEHEZ7iYz3ZpOpah7TnGIBGLhyoRU`; override with `PLACEMENT_CALENDAR_SPREADSHEET_ID` and `PLACEMENT_CALENDAR_SHEET_ID`.
+- The backend polls Google Sheets every 10 minutes by default (`PLACEMENT_CALENDAR_SYNC_INTERVAL_MS=600000`) and the admin page also has a manual Sync now button. Set the interval to `0` to disable automatic polling.
+- Each sync stores an immutable snapshot only when the canonical Sheet content or row visibility changes. Snapshots preserve visible and hidden rows, display/effective/user-entered cell values, notes/links where exposed by the Sheets API, row visibility flags, parsed events, and a version diff.
+- When a new snapshot is captured, the backend can notify any configured channels without blocking snapshot preservation. Email uses `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, and `PLACEMENT_CALENDAR_NOTIFY_EMAIL`. Google Chat uses `PLACEMENT_CALENDAR_GOOGLE_CHAT_WEBHOOK_URL`. WhatsApp uses Meta Cloud API settings: `WHATSAPP_CLOUD_API_VERSION`, `WHATSAPP_CLOUD_API_TOKEN`, `WHATSAPP_CLOUD_PHONE_NUMBER_ID`, and `PLACEMENT_CALENDAR_WHATSAPP_TO`; proactive WhatsApp alerts may require an approved Meta template depending on your WhatsApp setup.
+- Polling cannot capture changes that happen and are reverted between two syncs. The last good snapshot remains available if OAuth expires, Google rate limits, or a network error prevents a later sync.

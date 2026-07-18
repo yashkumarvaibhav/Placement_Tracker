@@ -14,13 +14,19 @@ import {
   deleteCompany,
   deleteStudent,
   ensureOfferBackfill,
+  diffPlacementCalendarSnapshots,
   getAppSettings,
   getTableCounts,
   getCompany,
+  getLatestPlacementCalendarSnapshot,
+  getPlacementCalendarCellHistory,
+  getPlacementCalendarSnapshot,
+  getPreviousPlacementCalendarSnapshotId,
   getStudent,
   initDb,
   listCompanies,
   listCompaniesByCycle,
+  listPlacementCalendarSnapshots,
   listStudents,
   listStudentsByCycle,
   addOfferToStudent,
@@ -29,6 +35,14 @@ import {
   updateCompany,
   updateStudent,
 } from './db.js';
+import {
+  createCalendarOAuthUrl,
+  disconnectCalendarOAuth,
+  getCalendarOAuthStatus,
+  handleCalendarOAuthCallback,
+  startPlacementCalendarAutoSync,
+  syncPlacementCalendar,
+} from './calendar-sync.js';
 
 const ADMIN_EMAIL = 'yash25091@iiitd.ac.in';
 const DEFAULT_VIEWER_USERNAME = process.env.VIEWER_USERNAME || 'guest@placement-atlas';
@@ -279,6 +293,109 @@ app.put('/api/admin/viewer-access', authMiddleware, requireDbReady, async (req, 
   }
 });
 
+app.get('/api/admin/calendar/oauth/callback', requireDbReady, async (req, res) => {
+  try {
+    const redirectUrl = await handleCalendarOAuthCallback({
+      code: req.query.code,
+      state: req.query.state,
+    });
+    return res.redirect(302, redirectUrl);
+  } catch (err) {
+    console.error('Placement Calendar OAuth callback failed:', err.message);
+    const fallback = `https://${PLACEMENT_ATLAS_HOST}/#/admin/calendar?calendarOAuth=failed&reason=callback-error`;
+    return res.redirect(302, fallback);
+  }
+});
+
+app.get('/api/admin/calendar/oauth/status', authMiddleware, requireDbReady, async (_req, res) => {
+  try {
+    return res.json(await getCalendarOAuthStatus());
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
+});
+
+app.post('/api/admin/calendar/oauth/start', authMiddleware, requireDbReady, async (_req, res) => {
+  try {
+    return res.json({ authorization_url: await createCalendarOAuthUrl() });
+  } catch (err) {
+    const status = err.code === 'OAUTH_NOT_CONFIGURED' ? 400 : 500;
+    return res.status(status).json({ message: err.message });
+  }
+});
+
+app.delete('/api/admin/calendar/oauth', authMiddleware, requireDbReady, async (_req, res) => {
+  try {
+    await disconnectCalendarOAuth();
+    return res.status(204).end();
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
+});
+
+app.get('/api/admin/calendar/snapshots', authMiddleware, requireDbReady, async (req, res) => {
+  try {
+    return res.json(await listPlacementCalendarSnapshots(req.query.limit));
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
+});
+
+app.get('/api/admin/calendar/latest', authMiddleware, requireDbReady, async (_req, res) => {
+  try {
+    const latest = await getLatestPlacementCalendarSnapshot();
+    if (!latest) return res.status(404).json({ message: 'No Placement Calendar snapshots have been captured yet.' });
+    return res.json(await getPlacementCalendarSnapshot(latest.id));
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
+});
+
+app.get('/api/admin/calendar/snapshots/:id/diff', authMiddleware, requireDbReady, async (req, res) => {
+  try {
+    const against = req.query.against === 'previous'
+      ? await getPreviousPlacementCalendarSnapshotId(req.params.id)
+      : req.query.against;
+    if (!against) return res.json({ diff: null });
+
+    const diff = await diffPlacementCalendarSnapshots(against, req.params.id);
+    if (!diff) return res.status(404).json({ message: 'One or both snapshots were not found.' });
+    return res.json({ diff });
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
+});
+
+app.get('/api/admin/calendar/snapshots/:id/cell-history', authMiddleware, requireDbReady, async (req, res) => {
+  try {
+    const history = await getPlacementCalendarCellHistory(req.params.id);
+    if (!history) return res.status(404).json({ message: 'Placement Calendar snapshot not found.' });
+    return res.json({ history });
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
+});
+
+app.get('/api/admin/calendar/snapshots/:id', authMiddleware, requireDbReady, async (req, res) => {
+  try {
+    const snapshot = await getPlacementCalendarSnapshot(req.params.id);
+    if (!snapshot) return res.status(404).json({ message: 'Placement Calendar snapshot not found.' });
+    return res.json(snapshot);
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
+});
+
+app.post('/api/admin/calendar/sync', authMiddleware, requireDbReady, async (_req, res) => {
+  try {
+    const result = await syncPlacementCalendar();
+    return res.status(result.created ? 201 : 200).json(result);
+  } catch (err) {
+    const status = err.code === 'CALENDAR_OAUTH_REQUIRED' ? 409 : 500;
+    return res.status(status).json({ message: err.message, code: err.code });
+  }
+});
+
 app.get('/api/batches', (_req, res) => {
   res.json(BATCHES);
 });
@@ -526,6 +643,7 @@ const start = async () => {
       dbReady = true;
       isDbReady = true;
       console.log('Database initialized successfully');
+      startPlacementCalendarAutoSync();
     } catch (err) {
       console.error('Failed to connect to DB, retrying in 10s...', err.message);
       await new Promise(res => setTimeout(res, 10000));

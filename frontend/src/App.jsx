@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { GoogleLogin, googleLogout } from '@react-oauth/google';
+import { api } from './api';
+import PlacementCalendarAdmin from './PlacementCalendarAdmin';
 import {
   BATCHES,
   DEFAULT_BATCH_KEY,
@@ -21,7 +23,6 @@ import {
 import { OFFICIAL_2025 } from './official2025';
 import { OFFICIAL_2026 } from './official2026';
 
-const api = axios.create({ baseURL: import.meta.env.VITE_API_BASE || '/api' });
 const assetBase = import.meta.env.BASE_URL || '/';
 const VIEWER_TOKEN_STORAGE_KEY = 'viewerToken';
 const COMPANY_SORT_FIELDS = new Set(['name', 'ctc', 'stipend', 'totalHired', 'offer_date']);
@@ -1138,10 +1139,12 @@ const App = () => {
   const [error, setError] = useState('');
   const [loginError, setLoginError] = useState('');
   const [authPending, setAuthPending] = useState(false);
+  const [sessionChecking, setSessionChecking] = useState(() => !!viewerToken);
   const refreshRequestId = useRef(0);
   const internalSearchRef = useRef('');
   const hydratingFromUrlRef = useRef(false);
   const isViewerAuthed = !!viewerToken;
+  const isAdminRoute = location.pathname.startsWith('/admin');
 
   const formatInr = (val, period = 'p.a.') => {
     if (val === null || val === undefined || Number.isNaN(Number(val))) return '—';
@@ -1341,7 +1344,7 @@ const App = () => {
   }, [activeBatch.key]);
 
   useEffect(() => {
-    if (!isViewerAuthed || location.pathname === '/admin') return;
+    if (!isViewerAuthed || isAdminRoute) return;
     if (hydratingFromUrlRef.current) {
       hydratingFromUrlRef.current = false;
       return;
@@ -1382,7 +1385,7 @@ const App = () => {
       internalSearchRef.current = nextSearchWithPrefix;
       navigate({ pathname: location.pathname, search: nextSearchWithPrefix }, { replace: true });
     }
-  }, [activeBatch.key, canonicalDashboardView, companyFilters, companySearch, companySort, companyView, isViewerAuthed, location.pathname, location.search, navigate, selectedCompanyId, selectedStudentId, studentFilters, studentSearch, studentSort, studentView]);
+  }, [activeBatch.key, canonicalDashboardView, companyFilters, companySearch, companySort, companyView, isAdminRoute, isViewerAuthed, location.pathname, location.search, navigate, selectedCompanyId, selectedStudentId, studentFilters, studentSearch, studentSort, studentView]);
 
   useEffect(() => {
     if (location.pathname !== '/companies') return;
@@ -1425,10 +1428,12 @@ const App = () => {
   useEffect(() => {
     if (!viewerToken) {
       setToken('');
+      setSessionChecking(false);
       return;
     }
 
     let active = true;
+    setSessionChecking(true);
     api.get('/auth/session', viewerHeaders)
       .then((response) => {
         if (!active) return;
@@ -1438,6 +1443,9 @@ const App = () => {
         if (!active) return;
         handleGoogleLogout();
         setLoginError('Your viewer session expired. Please sign in again.');
+      })
+      .finally(() => {
+        if (active) setSessionChecking(false);
       });
 
     return () => { active = false; };
@@ -2205,10 +2213,10 @@ const App = () => {
   };
 
   useEffect(() => {
-    if (isViewerAuthed) return refresh(activeBatch.key);
+    if (isViewerAuthed && !isAdminRoute) return refresh(activeBatch.key);
     return undefined;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isViewerAuthed, activeBatch.key]);
+  }, [isViewerAuthed, isAdminRoute, activeBatch.key]);
 
   const batchPayload = {
     batch_key: activeBatch.key,
@@ -2282,6 +2290,21 @@ const App = () => {
     refresh();
   };
 
+  const adminRoute = (element) => {
+    if (sessionChecking) {
+      return (
+        <main className="container section-page admin-checking-page">
+          <div className="card admin-settings-card">
+            <span className="eyebrow">Admin session</span>
+            <h2>Checking access</h2>
+            <p className="subtext">Verifying your admin session before loading this page.</p>
+          </div>
+        </main>
+      );
+    }
+    return isAdmin ? element : <Navigate to="/" replace />;
+  };
+
   if (!isViewerAuthed) {
     return (
       <LoginScreen
@@ -2351,13 +2374,14 @@ const App = () => {
             <div className="nav-actions">
               <ThemeToggle themeMode={themeMode} onToggle={toggleThemeMode} compact />
               <button className="secondary nav-signout" title="End viewer session" onClick={() => { closeMobileNav(); handleGoogleLogout(); }}>Sign out</button>
+              {isAdmin && <Link className="nav-admin-link" to="/admin/calendar" onClick={closeMobileNav}>Calendar</Link>}
               {isAdmin && <Link className="nav-admin-link" to="/admin" onClick={closeMobileNav}>Viewer Access</Link>}
             </div>
           </div>
         </div>
       </header>
 
-      {loading ? (
+      {loading && !isAdminRoute ? (
         <main className="container loading-main" aria-busy="true">
           <div className="skeleton-page" role="status" aria-label={`Loading ${activeBatch.label}`}>
             <div className="skeleton skeleton-eyebrow" />
@@ -3464,7 +3488,11 @@ const App = () => {
 
         <Route
           path="/admin"
-          element={isAdmin ? <ViewerAccessSettings authHeaders={authHeaders} /> : <Navigate to="/" replace />}
+          element={adminRoute(<ViewerAccessSettings authHeaders={authHeaders} />)}
+        />
+        <Route
+          path="/admin/calendar"
+          element={adminRoute(<PlacementCalendarAdmin authHeaders={authHeaders} />)}
         />
       </Routes>
       )}
