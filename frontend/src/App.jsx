@@ -505,6 +505,11 @@ const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), input:not([disabled
 const Modal = ({ open, onClose, label = 'Dialog', children }) => {
   const dialogRef = useRef(null);
   const lastFocused = useRef(null);
+  // Read onClose through a ref so the focus-trap effect only re-runs when the
+  // dialog opens/closes; parents pass inline handlers whose identity changes
+  // every render, and re-running the effect steals focus from the active input.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) return undefined;
@@ -517,7 +522,7 @@ const Modal = ({ open, onClose, label = 'Dialog', children }) => {
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {
         event.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== 'Tab') return;
@@ -549,7 +554,7 @@ const Modal = ({ open, onClose, label = 'Dialog', children }) => {
         lastFocused.current.focus();
       }
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
