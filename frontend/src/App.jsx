@@ -2226,9 +2226,27 @@ const App = () => {
       : batchPayload
   );
 
+  // Companies are cycle-scoped, so they can be added from the Overall view too — but a row
+  // must be stored under a real batch of the cycle (never the synthetic `cycle-<year>` key).
+  // Derive it from the branches picked in the form: M.Tech-only tags file the company under
+  // the cycle's M.Tech batch, anything else under B.Tech.
+  const cycleBatchForBranches = (branches) => {
+    const tokens = (Array.isArray(branches) ? branches : []).map(String);
+    const mtechOnly = tokens.length > 0 && tokens.every((token) => token.startsWith('M.Tech'));
+    const cycleBatches = BATCHES.filter((batch) => batch.graduation_year === activeBatch.graduation_year);
+    const chosen = cycleBatches.find((batch) => batch.degree === (mtechOnly ? 'M.Tech' : 'B.Tech'))
+      || cycleBatches.find((batch) => !batch.aggregate_only)
+      || cycleBatches[0];
+    return chosen
+      ? { batch_key: chosen.key, degree: chosen.degree, graduation_year: chosen.graduation_year }
+      : batchPayload;
+  };
+
   const saveCompany = async (payload) => {
     if (!isAdmin) return;
-    const recordBatch = resolveRecordBatch(editCompany);
+    const recordBatch = editCompany
+      ? resolveRecordBatch(editCompany)
+      : (isOverallScope ? cycleBatchForBranches(payload.branches) : batchPayload);
     if (editCompany) {
       await api.put(`/companies/${editCompany.id}`, { ...payload, ...recordBatch }, authHeaders);
     } else {
@@ -2894,9 +2912,7 @@ const App = () => {
                     </select>
                   </label>
                   {(companySearch || Object.values(companyFilters).some(Boolean)) && <button type="button" className="secondary clear-filters-button" onClick={() => { setCompanySearch(''); setCompanyFilters(DEFAULT_COMPANY_FILTERS); }}>Clear filters</button>}
-                  {isAdmin && (isOverallScope
-                    ? <span className="subtext add-scope-hint" title="The Overall view spans both degrees">Switch to a specific batch (B.Tech / M.Tech) to add a company</span>
-                    : <button onClick={() => { setEditCompany(null); setShowCompanyModal(true); }}>Add company</button>)}
+                  {isAdmin && <button onClick={() => { setEditCompany(null); setShowCompanyModal(true); }}>Add company</button>}
                 </MobileDisclosure>
               </section>
 

@@ -375,8 +375,12 @@ app.post('/api/students', authMiddleware, async (req, res) => {
       for (const offer of offers) {
         const existsCompany = await getCompany(offer.company_id);
         if (!existsCompany) return res.status(400).json({ message: `Company does not exist (id: ${offer.company_id})` });
-        if (existsCompany.batch_key && existsCompany.batch_key !== payload.batch_key) {
-          return res.status(400).json({ message: `Company ${offer.company_id} belongs to a different batch` });
+        // Companies are cycle-scoped: any company of the student's graduation cycle may be
+        // attached, regardless of which degree batch stores the company row.
+        const companyYear = Number(existsCompany.graduation_year) || null;
+        const studentYear = Number(payload.graduation_year) || null;
+        if (companyYear && studentYear && companyYear !== studentYear) {
+          return res.status(400).json({ message: `Company ${offer.company_id} belongs to a different placement cycle` });
         }
       }
     }
@@ -398,8 +402,12 @@ app.put('/api/students/:id', authMiddleware, async (req, res) => {
       for (const offer of offers) {
         const existsCompany = await getCompany(offer.company_id);
         if (!existsCompany) return res.status(400).json({ message: `Company does not exist (id: ${offer.company_id})` });
-        if (existsCompany.batch_key && existsCompany.batch_key !== payload.batch_key) {
-          return res.status(400).json({ message: `Company ${offer.company_id} belongs to a different batch` });
+        // Companies are cycle-scoped: any company of the student's graduation cycle may be
+        // attached, regardless of which degree batch stores the company row.
+        const companyYear = Number(existsCompany.graduation_year) || null;
+        const studentYear = Number(payload.graduation_year) || null;
+        if (companyYear && studentYear && companyYear !== studentYear) {
+          return res.status(400).json({ message: `Company ${offer.company_id} belongs to a different placement cycle` });
         }
       }
     }
