@@ -51,6 +51,7 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '183667160330-4jtc41mg2
 const PLACEMENT_ATLAS_HOST = process.env.PLACEMENT_ATLAS_HOST || 'placement-atlas.yashkumarvaibhav.me';
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 const VIEWER_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const ADMIN_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const PORT = process.env.PORT || 4000;
 const frontendDistPath = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -124,6 +125,7 @@ const createAdminSession = () => createSignedSession({
   type: 'admin',
   auth_source: 'google',
   subject: 'primary-admin',
+  expires_at: Date.now() + ADMIN_SESSION_TTL_MS,
 });
 
 const isValidViewerSession = (token) => {
@@ -135,7 +137,30 @@ const isValidAdminSession = (token) => {
   const session = readSignedSession(token);
   return session?.type === 'admin'
     && session.auth_source === 'google'
-    && session.subject === 'primary-admin';
+    && session.subject === 'primary-admin'
+    && Number(session.expires_at) > Date.now();
+};
+
+// Minimal in-memory limiter for the auth endpoints: argon2 verification is deliberately
+// expensive, so unthrottled guessing is both a brute-force and a CPU-DoS vector. Per-process
+// state is fine for this single-instance deployment.
+const AUTH_RATE_WINDOW_MS = 5 * 60 * 1000;
+const AUTH_RATE_MAX_ATTEMPTS = 20;
+const authAttempts = new Map();
+const authRateLimiter = (req, res, next) => {
+  const key = String(req.headers['x-forwarded-for'] || req.ip || 'unknown').split(',')[0].trim();
+  const now = Date.now();
+  if (authAttempts.size > 10000) {
+    for (const [k, v] of authAttempts) { if (now > v.resetAt) authAttempts.delete(k); }
+  }
+  const entry = authAttempts.get(key) || { count: 0, resetAt: now + AUTH_RATE_WINDOW_MS };
+  if (now > entry.resetAt) { entry.count = 0; entry.resetAt = now + AUTH_RATE_WINDOW_MS; }
+  entry.count += 1;
+  authAttempts.set(key, entry);
+  if (entry.count > AUTH_RATE_MAX_ATTEMPTS) {
+    return res.status(429).json({ message: 'Too many sign-in attempts. Please wait a few minutes and try again.' });
+  }
+  return next();
 };
 
 const safeEqual = (left, right) => {
@@ -204,7 +229,7 @@ const authMiddleware = (req, res, next) => {
   return next();
 };
 
-app.post('/api/auth/google', async (req, res) => {
+app.post('/api/auth/google', authRateLimiter, async (req, res) => {
   try {
     const credential = req.body?.credential;
     if (!credential) return res.status(400).json({ message: 'Google credential is required.' });
@@ -227,14 +252,14 @@ app.post('/api/auth/google', async (req, res) => {
     return res.json({
       token: isAdmin ? createAdminSession() : createViewerSession(),
       is_admin: isAdmin,
-      expires_in: isAdmin ? null : VIEWER_SESSION_TTL_MS / 1000,
+      expires_in: (isAdmin ? ADMIN_SESSION_TTL_MS : VIEWER_SESSION_TTL_MS) / 1000,
     });
   } catch {
     return res.status(401).json({ message: 'Google sign-in could not be verified.' });
   }
 });
 
-app.post('/api/auth/viewer', requireDbReady, async (req, res) => {
+app.post('/api/auth/viewer', authRateLimiter, requireDbReady, async (req, res) => {
   try {
     const username = String(req.body?.username || '').trim().toLowerCase();
     const password = String(req.body?.password || '');
@@ -414,8 +439,9 @@ app.use('/api/students', requireDbReady);
 app.use('/api/stats', requireDbReady);
 app.use('/api/health', requireDbReady);
 
-// Company routes
-app.get('/api/companies', async (req, res) => {
+// Company routes. All data routes require a signed-in viewer (or admin): the records are
+// per-student placement outcomes, so the login wall must exist server-side, not just in the UI.
+app.get('/api/companies', requireViewerAuth, async (req, res) => {
   try {
     const data = req.query.cycle
       ? await listCompaniesByCycle(Number(req.query.cycle))
@@ -426,7 +452,7 @@ app.get('/api/companies', async (req, res) => {
   }
 });
 
-app.get('/api/companies/:id', async (req, res) => {
+app.get('/api/companies/:id', requireViewerAuth, async (req, res) => {
   try {
     const company = await getCompany(req.params.id);
     if (!company) return res.status(404).json({ message: 'Company not found' });
@@ -462,7 +488,7 @@ app.delete('/api/companies/:id', authMiddleware, async (req, res) => {
 });
 
 // Student routes
-app.get('/api/students', async (req, res) => {
+app.get('/api/students', requireViewerAuth, async (req, res) => {
   try {
     const data = req.query.cycle
       ? await listStudentsByCycle(Number(req.query.cycle))
@@ -473,7 +499,7 @@ app.get('/api/students', async (req, res) => {
   }
 });
 
-app.get('/api/students/:id', async (req, res) => {
+app.get('/api/students/:id', requireViewerAuth, async (req, res) => {
   try {
     const student = await getStudent(req.params.id);
     if (!student) return res.status(404).json({ message: 'Student not found' });
@@ -586,7 +612,7 @@ app.post('/api/offers/:id/convert-to-ppo', authMiddleware, async (req, res) => {
   }
 });
 
-app.get('/api/stats', async (req, res) => {
+app.get('/api/stats', requireViewerAuth, async (req, res) => {
   try {
     const stats = req.query.cycle
       ? await buildStats(null, Number(req.query.cycle))
@@ -598,7 +624,18 @@ app.get('/api/stats', async (req, res) => {
   }
 });
 
+// Public health stays a bare probe; infra details (DB host/database, table counts) are
+// admin-only so the public endpoint no longer maps the deployment.
 app.get('/api/health', async (_req, res) => {
+  try {
+    await getTableCounts();
+    res.json({ status: 'ok' });
+  } catch {
+    res.status(500).json({ status: 'error' });
+  }
+});
+
+app.get('/api/admin/health', authMiddleware, async (_req, res) => {
   try {
     const counts = await getTableCounts();
     res.json({ status: 'ok', db: { host: process.env.PGHOST, database: process.env.PGDATABASE }, counts });
