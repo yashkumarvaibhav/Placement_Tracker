@@ -16,6 +16,7 @@ import {
   isFullTimeOfferType,
   isInternshipOfferType,
   isPlacementQualifyingOfferType,
+  isSummerInternOfferType,
 } from './offerTypes';
 import { OFFICIAL_2025 } from './official2025';
 import { OFFICIAL_2026 } from './official2026';
@@ -573,6 +574,77 @@ const Modal = ({ open, onClose, label = 'Dialog', children }) => {
         {children}
       </div>
     </div>
+  );
+};
+
+// Admin action on an internship-only offer (Intern / Summer Intern): expands into a small
+// form asking for the full-time package, then converts the offer to its "+ PPO" variant.
+// Renders nothing for other offer types or offers without a persisted id.
+const ConvertToPpo = ({ offer, onConvert }) => {
+  const [expanded, setExpanded] = useState(false);
+  const [role, setRole] = useState('');
+  const [ctc, setCtc] = useState('');
+  const [offerDate, setOfferDate] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  if (!offer?.id || !isInternshipOfferType(offer.offer_type) || isFullTimeOfferType(offer.offer_type)) return null;
+
+  const targetType = isSummerInternOfferType(offer.offer_type) ? 'Summer Intern + PPO' : 'Intern + PPO';
+
+  const openForm = () => {
+    setRole(offer.role || '');
+    setCtc(offer.company_ctc ?? '');
+    setOfferDate(new Date().toISOString().slice(0, 10));
+    setError('');
+    setExpanded(true);
+  };
+
+  const submit = async (event) => {
+    event.preventDefault();
+    if (!(Number(ctc) > 0)) {
+      setError('Enter the full-time CTC (₹ p.a.) for the PPO.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      await onConvert(offer, { ctc: Number(ctc), role: role.trim() || null, offer_date: offerDate || null });
+      setExpanded(false);
+    } catch (err) {
+      setError(err.response?.data?.message || err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!expanded) {
+    return <button type="button" className="secondary ppo-convert-button" onClick={openForm}>Convert to PPO</button>;
+  }
+
+  return (
+    <form className="ppo-convert-form" onSubmit={submit}>
+      <span className="eyebrow">Convert to {targetType}</span>
+      <div className="flex-row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <label>
+          CTC (₹ p.a.)
+          <input type="number" min="0" step="any" value={ctc} onChange={(e) => setCtc(e.target.value)} required autoFocus />
+        </label>
+        <label>
+          Role
+          <input value={role} onChange={(e) => setRole(e.target.value)} placeholder={offer.role || 'Role'} />
+        </label>
+        <label>
+          PPO offer date
+          <input type="date" value={offerDate} onChange={(e) => setOfferDate(e.target.value)} />
+        </label>
+      </div>
+      {error && <div className="error-text">{error}</div>}
+      <div className="flex-row" style={{ gap: 8 }}>
+        <button type="submit" disabled={busy}>{busy ? 'Converting…' : 'Convert to PPO'}</button>
+        <button type="button" className="secondary" onClick={() => setExpanded(false)} disabled={busy}>Cancel</button>
+      </div>
+    </form>
   );
 };
 
@@ -1575,6 +1647,15 @@ const App = () => {
     }
   };
 
+  // Converts an Intern / Summer Intern offer to its "+ PPO" variant. The backend returns the
+  // refreshed student, so an open student detail modal updates immediately; refresh() then
+  // reconciles the directory lists and company hiring stats.
+  const convertOfferToPpoAction = async (offer, payload) => {
+    const { data } = await api.post(`/offers/${offer.id}/convert-to-ppo`, payload, authHeaders);
+    setSelectedStudent((prev) => (prev && String(prev.id) === String(data.id) ? data : prev));
+    refresh();
+  };
+
   const openStudentDetail = (student) => {
     setSelectedStudent(student);
     setSelectedStudentId(student?.id ? String(student.id) : '');
@@ -1732,7 +1813,7 @@ const App = () => {
         stats[cid].total++;
         if (stats[cid][branchGroup] !== undefined) stats[cid][branchGroup]++;
         else stats[cid].OTHER++;
-        stats[cid].students.push({ name: s.name, roll: s.roll_number, program: s.program, branch_group: branchGroup });
+        stats[cid].students.push({ name: s.name, roll: s.roll_number, program: s.program, branch_group: branchGroup, offer: o });
       });
     });
     return stats;
@@ -3052,7 +3133,11 @@ const App = () => {
                           <h3 className="detail-section-title">Hired students</h3>
                           <div className="hired-students-list">
                             {stats.students.map((student, index) => (
-                              <div key={`${student.roll}-${index}`}><span className="student-avatar">{initialsFor(student.name)}</span><div><strong>{student.name}</strong><small>{student.roll} · {student.program}</small></div></div>
+                              <div key={`${student.roll}-${index}`}>
+                                <span className="student-avatar">{initialsFor(student.name)}</span>
+                                <div><strong>{student.name}</strong><small>{student.roll} · {student.program}{student.offer?.offer_type ? ` · ${student.offer.offer_type}` : ''}</small></div>
+                                {isAdmin && <ConvertToPpo offer={student.offer} onConvert={convertOfferToPpoAction} />}
+                              </div>
                             ))}
                           </div>
                         </>
@@ -3345,7 +3430,10 @@ const App = () => {
                         {offers.length ? offers.map((offer, index) => (
                           <article key={offer.id || index}>
                             <span className="timeline-marker">{String(index + 1).padStart(2, '0')}</span>
-                            <div><span className="eyebrow">{offer.offer_type || 'Offer'} · {formatDate(offer.offer_date)}</span><h3>{offer.company_name || selectedStudent.company_name || 'Company not recorded'}</h3><p>{formatInr(offer.ctc ?? offer.company_ctc, 'p.a.')} · {formatInr(offer.stipend ?? offer.company_stipend, 'p.m.')}</p></div>
+                            <div>
+                              <span className="eyebrow">{offer.offer_type || 'Offer'} · {formatDate(offer.offer_date)}</span><h3>{offer.company_name || selectedStudent.company_name || 'Company not recorded'}</h3><p>{formatInr(offer.ctc ?? offer.company_ctc, 'p.a.')} · {formatInr(offer.stipend ?? offer.company_stipend, 'p.m.')}</p>
+                              {isAdmin && <ConvertToPpo offer={offer} onConvert={convertOfferToPpoAction} />}
+                            </div>
                           </article>
                         )) : <div className="empty-detail-state">No offer journey has been recorded for this student.</div>}
                       </div>

@@ -24,6 +24,7 @@ import {
   listStudents,
   listStudentsByCycle,
   addOfferToStudent,
+  convertOfferToPpo,
   setAppSettings,
   updateCompany,
   updateStudent,
@@ -438,6 +439,25 @@ app.post('/api/offers', authMiddleware, async (req, res) => {
     res.status(201).json(updated);
   } catch (err) {
     res.status(400).json({ message: err.message });
+  }
+});
+
+// Convert an internship-only offer (Intern / Summer Intern) into its "+ PPO" variant.
+// The full-time CTC is required; role and PPO offer date are optional refinements.
+app.post('/api/offers/:id/convert-to-ppo', authMiddleware, async (req, res) => {
+  try {
+    const ctc = Number(req.body?.ctc);
+    if (!Number.isFinite(ctc) || ctc <= 0) {
+      return res.status(400).json({ message: 'A full-time CTC (₹ p.a.) is required to convert an offer to PPO' });
+    }
+    const updated = await convertOfferToPpo(req.params.id, {
+      ctc,
+      role: req.body?.role || null,
+      offer_date: req.body?.offer_date || null,
+    });
+    res.json(updated);
+  } catch (err) {
+    res.status(err.message === 'Offer not found' ? 404 : 400).json({ message: err.message });
   }
 });
 

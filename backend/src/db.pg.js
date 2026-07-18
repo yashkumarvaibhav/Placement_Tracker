@@ -12,6 +12,7 @@ import {
   isFullTimeOfferType,
   isInternshipOfferType,
   isPlacementQualifyingOfferType,
+  isSummerInternOfferType,
 } from './offer-types.js';
 
 
@@ -589,6 +590,42 @@ export const addOfferToStudent = async (studentId, offer) => {
     );
   }
   return getStudent(studentId);
+};
+
+// Converts an internship-only offer (Intern / Summer Intern) into its "+ PPO" variant with
+// the full-time package details. A PPO is a qualifying outcome, so a not-yet-placed student
+// becomes Placed with this offer as their primary; for an already-placed student the
+// denormalized primary-offer columns are refreshed only when this offer is the primary.
+export const convertOfferToPpo = async (offerId, { ctc, role, offer_date } = {}) => {
+  const { rows } = await query('SELECT * FROM offers WHERE id = $1', [offerId]);
+  const offer = rows[0];
+  if (!offer) throw new Error('Offer not found');
+  if (!isInternshipOfferType(offer.offer_type) || isFullTimeOfferType(offer.offer_type)) {
+    throw new Error('Only Intern or Summer Intern offers can be converted to PPO');
+  }
+
+  const newType = isSummerInternOfferType(offer.offer_type) ? 'Summer Intern + PPO' : 'Intern + PPO';
+  await query(
+    'UPDATE offers SET offer_type=$1, ctc=$2, role=COALESCE($3, role), offer_date=COALESCE($4, offer_date) WHERE id=$5',
+    [newType, ctc ?? null, role || null, offer_date || null, offerId]
+  );
+
+  const refreshed = await getStudent(offer.student_id);
+  const converted = (refreshed?.offers || []).find((o) => String(o.id) === String(offerId));
+  if (converted) {
+    if (refreshed.placement_status !== 'Placed') {
+      await query(
+        `UPDATE students SET placement_status='Placed', company_id=$1, offer_type=$2, ctc=$3, stipend=$4, registration_deadline=$5, offer_date=$6 WHERE id=$7`,
+        [converted.company_id, converted.offer_type, converted.ctc ?? null, converted.stipend ?? null, converted.registration_deadline || null, converted.offer_date || null, offer.student_id]
+      );
+    } else if (String(refreshed.company_id || '') === String(converted.company_id)) {
+      await query(
+        'UPDATE students SET offer_type=$1, ctc=$2, stipend=$3, offer_date=$4 WHERE id=$5',
+        [converted.offer_type, converted.ctc ?? null, converted.stipend ?? null, converted.offer_date || null, offer.student_id]
+      );
+    }
+  }
+  return getStudent(offer.student_id);
 };
 
 export const deleteStudent = async (id) => {

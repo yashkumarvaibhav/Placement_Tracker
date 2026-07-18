@@ -525,3 +525,12 @@ header:focus-within { transform: translateY(0) !important; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
+
+/* Convert-to-PPO control (student detail timeline + company hired-students list) */
+.ppo-convert-button { flex-shrink: 0; margin-left: auto; padding: 6px 12px; font-size: .72rem; }
+.offer-timeline .ppo-convert-button { margin: 10px 0 0; }
+.hired-students-list > div { flex-wrap: wrap; }
+.ppo-convert-form { flex-basis: 100%; display: grid; gap: 8px; margin-top: 8px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-sidebar); }
+.ppo-convert-form .flex-row { display: flex; }
+.ppo-convert-form label { min-width: 130px; }
+.offer-timeline .ppo-convert-form { margin-top: 12px; }
