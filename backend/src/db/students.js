@@ -38,9 +38,20 @@ const fetchStudentWithCompanies = async ({ studentId = null, batchKey = DEFAULT_
   const whereClause = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
 
   const { rows: students } = await run(
-    `SELECT s.*, c.name as company_name, c.category as company_category, c.type as company_type, c.ctc as company_ctc, c.stipend as company_stipend
+    `SELECT s.*, c.name as company_name, c.category as company_category, c.type as company_type, c.ctc as company_ctc, c.stipend as company_stipend,
+            COALESCE(r.rating_count, 0)::int AS rating_count,
+            r.rating_overall, r.rating_dsa, r.rating_ml
      FROM students s
      LEFT JOIN companies c ON s.company_id = c.id
+     LEFT JOIN (
+       SELECT target_student_id,
+              COUNT(*)::int AS rating_count,
+              ROUND(AVG(overall)::numeric, 1)::double precision AS rating_overall,
+              ROUND(AVG(dsa)::numeric, 1)::double precision AS rating_dsa,
+              ROUND(AVG(ml)::numeric, 1)::double precision AS rating_ml
+       FROM skill_ratings
+       GROUP BY target_student_id
+     ) r ON r.target_student_id = s.id
      ${whereClause}
      ORDER BY s.roll_number ASC`,
     params

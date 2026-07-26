@@ -6,3 +6,4 @@ export * from './db/calendar.js';
 export * from './db/companies.js';
 export * from './db/students.js';
 export * from './db/stats.js';
+export * from './db/ratings.js';

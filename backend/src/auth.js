@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import argon2 from 'argon2';
 import { getAppSettings, setAppSettings } from './db.js';
 import {
+  ADMIN_EMAIL,
   ADMIN_SESSION_TTL_MS,
   DEFAULT_VIEWER_PASSWORD,
   DEFAULT_VIEWER_USERNAME,
@@ -32,15 +33,18 @@ const readSignedSession = (token) => {
   }
 };
 
-export const createViewerSession = () => createSignedSession({
+export const createViewerSession = (email = '') => createSignedSession({
   type: 'viewer',
+  auth_source: email ? 'google' : 'shared',
+  email: String(email || '').trim().toLowerCase() || undefined,
   expires_at: Date.now() + VIEWER_SESSION_TTL_MS,
 });
 
-export const createAdminSession = () => createSignedSession({
+export const createAdminSession = (email = ADMIN_EMAIL) => createSignedSession({
   type: 'admin',
   auth_source: 'google',
   subject: 'primary-admin',
+  email: String(email || ADMIN_EMAIL).trim().toLowerCase(),
   expires_at: Date.now() + ADMIN_SESSION_TTL_MS,
 });
 
@@ -133,10 +137,51 @@ export const bearerToken = (req) => {
   return auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
 };
 
+export const getAuthenticatedSession = (req) => {
+  const session = readSignedSession(bearerToken(req));
+  if (!session || Number(session.expires_at) <= Date.now()) return null;
+  if (session.type === 'admin'
+    && session.auth_source === 'google'
+    && session.subject === 'primary-admin') {
+    return session;
+  }
+  if (session.type === 'viewer') return session;
+  return null;
+};
+
+export const getRatingEmail = (req) => {
+  const session = getAuthenticatedSession(req);
+  if (!session) return '';
+  if (session.type === 'admin') {
+    // Admin sessions created before the ratings launch did not include the email, but their
+    // signed primary-admin subject is already bound to the configured admin account.
+    return String(session.email || ADMIN_EMAIL).trim().toLowerCase();
+  }
+  if (session.auth_source !== 'google') return '';
+  return String(session.email || '').trim().toLowerCase();
+};
+
+export const ratingAccountId = (req) => {
+  const email = getRatingEmail(req);
+  const identity = email || 'shared-viewer';
+  return crypto.createHmac('sha256', SESSION_SECRET).update(`ratings:${identity}`).digest('base64url').slice(0, 18);
+};
+
 export const requireViewerAuth = (req, res, next) => {
   const token = bearerToken(req);
   if (isValidAdminSession(token) || isValidViewerSession(token)) return next();
   return res.status(401).json({ message: 'A verified IIIT Delhi sign-in is required.' });
+};
+
+export const requireRatingAuth = (req, res, next) => {
+  const email = getRatingEmail(req);
+  if (!email) {
+    return res.status(403).json({
+      message: 'Skill ratings require an individual IIIT Delhi Google sign-in so admins can audit attribution.',
+    });
+  }
+  req.ratingEmail = email;
+  return next();
 };
 
 export const authMiddleware = (req, res, next) => {

@@ -7,6 +7,7 @@ import adminRoutes from './routes/admin.js';
 import companiesRoutes from './routes/companies.js';
 import studentsRoutes from './routes/students.js';
 import offersRoutes from './routes/offers.js';
+import ratingsRoutes from './routes/ratings.js';
 import miscRoutes from './routes/misc.js';
 
 const app = express();
@@ -27,6 +28,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/companies', companiesRoutes);
 app.use('/api/students', studentsRoutes);
 app.use('/api/offers', offersRoutes);
+app.use('/api/ratings', ratingsRoutes);
 app.use('/api', miscRoutes);
 
 app.use('/api', (_req, res) => {

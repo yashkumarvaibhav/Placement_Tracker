@@ -14,9 +14,15 @@ vi.mock('../src/db.js', () => ({
   getAppSettings: vi.fn(async () => ({})),
   getCompany: vi.fn(async () => undefined),
   getLatestPlacementCalendarSnapshot: vi.fn(),
+  getMySkillRatings: vi.fn(async () => []),
   getPlacementCalendarCellHistory: vi.fn(),
   getPlacementCalendarSnapshot: vi.fn(),
   getPreviousPlacementCalendarSnapshotId: vi.fn(),
+  getRatingViewerContext: vi.fn(async () => null),
+  getSkillRatingAnalytics: vi.fn(async () => ({
+    summary: { total_ratings: 0, participating_raters: 0, students_rated: 0 },
+    ratings: [],
+  })),
   getStudent: vi.fn(async () => undefined),
   getTableCounts: vi.fn(async () => ({ companies: 0, students: 0, offers: 0 })),
   listCompanies: vi.fn(async () => []),
@@ -25,6 +31,10 @@ vi.mock('../src/db.js', () => ({
   listStudents: vi.fn(async () => []),
   listStudentsByCycle: vi.fn(async () => []),
   setAppSettings: vi.fn(async () => {}),
+  saveSkillRating: vi.fn(async (_email, targetStudentId, ratings) => ({
+    created: true,
+    rating: { target_student_id: targetStudentId, ...ratings },
+  })),
   updateCompany: vi.fn(async (id, payload) => ({ id, ...payload })),
   updateStudent: vi.fn(async (id, payload) => ({ id, ...payload })),
   addOfferToStudent: vi.fn(async () => ({})),
@@ -148,6 +158,88 @@ describe('request validation policy', () => {
     expect(res.status).toBe(409);
     expect(res.body.message).toMatch(/3 student offers and 1 student record/);
     expect(db.deleteCompany).not.toHaveBeenCalled();
+  });
+});
+
+describe('skill ratings privacy and update policy', () => {
+  const asGoogleViewer = () => `Bearer ${createViewerSession('peer25001@iiitd.ac.in')}`;
+
+  it('does not let an unidentifiable shared viewer submit ratings', async () => {
+    const res = await request(app)
+      .put('/api/ratings/1')
+      .set('Authorization', asViewer())
+      .send({ overall: 8, dsa: 9, ml: 7 });
+    expect(res.status).toBe(403);
+    expect(db.saveSkillRating).not.toHaveBeenCalled();
+  });
+
+  it('validates all three scores as whole numbers from 1 to 10', async () => {
+    const res = await request(app)
+      .put('/api/ratings/1')
+      .set('Authorization', asGoogleViewer())
+      .send({ overall: 8, dsa: 11, ml: 7 });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/DSA rating/);
+  });
+
+  it('submits attributable ratings without exposing the email in the response', async () => {
+    db.getStudent.mockResolvedValueOnce({ id: 1, name: 'Batchmate' });
+    const res = await request(app)
+      .put('/api/ratings/1')
+      .set('Authorization', asGoogleViewer())
+      .send({ overall: 8, dsa: 9, ml: 7 });
+    expect(res.status).toBe(201);
+    expect(db.saveSkillRating).toHaveBeenCalledWith(
+      'peer25001@iiitd.ac.in',
+      1,
+      { overall: 8, dsa: 9, ml: 7 },
+      { confirmUpdate: false }
+    );
+    expect(res.body).not.toHaveProperty('rater_email');
+  });
+
+  it('keeps attribution analytics admin-only', async () => {
+    expect((await request(app)
+      .get('/api/ratings/analytics')
+      .set('Authorization', asGoogleViewer())).status).toBe(401);
+
+    const res = await request(app)
+      .get('/api/ratings/analytics')
+      .set('Authorization', asAdmin());
+    expect(res.status).toBe(200);
+    expect(db.getSkillRatingAnalytics).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes explicit update confirmation to the data layer', async () => {
+    db.getStudent.mockResolvedValueOnce({ id: 1, name: 'Batchmate' });
+    db.saveSkillRating.mockResolvedValueOnce({
+      created: false,
+      rating: { target_student_id: 1, overall: 6, dsa: 7, ml: 8 },
+    });
+    const res = await request(app)
+      .put('/api/ratings/1')
+      .set('Authorization', asGoogleViewer())
+      .send({ overall: 6, dsa: 7, ml: 8, confirm_update: true });
+    expect(res.status).toBe(200);
+    expect(db.saveSkillRating).toHaveBeenCalledWith(
+      'peer25001@iiitd.ac.in',
+      1,
+      { overall: 6, dsa: 7, ml: 8 },
+      { confirmUpdate: true }
+    );
+  });
+
+  it('returns a confirmation-required conflict when an existing rating is changed silently', async () => {
+    db.getStudent.mockResolvedValueOnce({ id: 1, name: 'Batchmate' });
+    const confirmationError = new Error('Confirm before changing an existing rating.');
+    confirmationError.code = 'RATING_CONFIRMATION_REQUIRED';
+    db.saveSkillRating.mockRejectedValueOnce(confirmationError);
+    const res = await request(app)
+      .put('/api/ratings/1')
+      .set('Authorization', asGoogleViewer())
+      .send({ overall: 6, dsa: 7, ml: 8 });
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual(expect.objectContaining({ confirmation_required: true }));
   });
 });
 

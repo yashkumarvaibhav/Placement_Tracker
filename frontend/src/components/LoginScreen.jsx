@@ -88,7 +88,7 @@ const LoginScreen = ({ assetBase, onSuccess, onError, onViewerLogin, error, pend
           {pending && <span className="verification-status">Verifying access...</span>}
           <div className="privacy-note">
             <strong>Viewer access is read-only and cannot grant admin permissions.</strong>
-            <span>Google email addresses are checked only for eligibility and are not stored.</span>
+            <span>Your Google address is never shown to viewers. It is used privately to link your roster identity and audit any skill ratings you submit.</span>
           </div>
         </div>
       </aside>

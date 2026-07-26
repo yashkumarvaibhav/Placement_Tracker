@@ -6,11 +6,14 @@ import {
   createAdminSession,
   createViewerSession,
   getViewerCredentials,
+  getRatingEmail,
   isValidAdminSession,
+  ratingAccountId,
   requireViewerAuth,
   safeEqual,
   verifyPassword,
 } from '../auth.js';
+import { getRatingViewerContext } from '../db.js';
 import { requireDbReady } from '../ready.js';
 import { ADMIN_EMAIL, ADMIN_SESSION_TTL_MS, GOOGLE_CLIENT_ID, VIEWER_SESSION_TTL_MS } from '../config.js';
 
@@ -38,7 +41,7 @@ router.post('/google', authRateLimiter, async (req, res) => {
 
     const isAdmin = email === ADMIN_EMAIL;
     return res.json({
-      token: isAdmin ? createAdminSession() : createViewerSession(),
+      token: isAdmin ? createAdminSession(email) : createViewerSession(email),
       is_admin: isAdmin,
       expires_in: (isAdmin ? ADMIN_SESSION_TTL_MS : VIEWER_SESSION_TTL_MS) / 1000,
     });
@@ -67,11 +70,20 @@ router.post('/viewer', authRateLimiter, requireDbReady, async (req, res) => {
   }
 });
 
-router.get('/session', requireViewerAuth, (req, res) => {
-  res.json({
-    valid: true,
-    is_admin: isValidAdminSession(bearerToken(req)),
-  });
+router.get('/session', requireViewerAuth, async (req, res, next) => {
+  try {
+    const email = getRatingEmail(req);
+    const selfStudent = email ? await getRatingViewerContext(email) : null;
+    return res.json({
+      valid: true,
+      is_admin: isValidAdminSession(bearerToken(req)),
+      can_rate: Boolean(email),
+      ratings_account_id: ratingAccountId(req),
+      self_student: selfStudent,
+    });
+  } catch (err) {
+    return next(err);
+  }
 });
 
 export default router;

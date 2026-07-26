@@ -413,6 +413,78 @@ header:focus-within { transform: translateY(0) !important; }
 .error-text { color: var(--danger); }
 .add-scope-hint { align-self: center; max-width: 260px; font-size: .78rem; line-height: 1.3; }
 
+/* Private batchmate skill ratings */
+.ratings-hero-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.ratings-hero-actions button { min-height: 38px; padding: 7px 12px; font-size: .78rem; }
+.skill-rating-summary { display: grid; gap: 10px; margin-top: 18px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-soft); }
+.skill-rating-summary-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.skill-rating-summary-heading > span { color: var(--text-strong); font-size: .78rem; font-weight: 800; }
+.skill-rating-summary-heading > small { color: var(--text-faint); font-size: .7rem; }
+.skill-rating-scores { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+.skill-rating-scores > span { min-width: 0; display: flex; align-items: baseline; gap: 3px; border-left: 2px solid var(--accent); padding-left: 8px; }
+.skill-rating-scores small { color: var(--text-faint); font-size: .66rem; font-weight: 700; text-transform: uppercase; }
+.skill-rating-scores strong { margin-left: auto; color: var(--text-strong); font: 600 1rem var(--font-serif); font-variant-numeric: tabular-nums; }
+.skill-rating-scores i { color: var(--text-faint); font-size: .62rem; font-style: normal; }
+.skill-rating-summary.compact { gap: 6px; margin: 0; padding: 9px 10px; background: var(--bg-sidebar); }
+.skill-rating-summary.compact .skill-rating-summary-heading > span { font-size: .7rem; }
+.skill-rating-summary.compact .skill-rating-scores > span { display: grid; grid-template-columns: 1fr auto; gap: 0 4px; padding-left: 5px; }
+.skill-rating-summary.compact .skill-rating-scores strong { margin: 0; font-size: .88rem; }
+.skill-rating-summary.compact .skill-rating-scores i { display: none; }
+.student-card-rating { display: grid; gap: 8px; padding: 0 14px 10px; }
+.student-card-rating > button { width: 100%; min-height: 34px; padding: 6px 10px; font-size: .74rem; }
+.table-rating-cell { min-width: 230px; display: grid; grid-template-columns: minmax(150px, 1fr) auto; align-items: center; gap: 7px; }
+.table-rating-cell button { min-height: 34px; padding: 6px 8px; white-space: nowrap; }
+
+.ratings-intro, .ratings-analytics { display: grid; gap: 16px; padding-right: 40px; }
+.ratings-intro h2, .ratings-analytics h2 { font-size: clamp(1.6rem, 4vw, 2.15rem); }
+.ratings-intro-lead, .ratings-analytics-lead { max-width: 640px; color: var(--text-muted); font-size: .88rem; }
+.ratings-demo-card { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: linear-gradient(135deg, var(--accent-soft), var(--bg-raised) 72%); }
+.ratings-demo-card > div:first-child { display: flex; align-items: center; gap: 10px; }
+.ratings-demo-card > div:first-child > span:last-child { display: grid; }
+.ratings-demo-card strong { color: var(--text-strong); font-family: var(--font-serif); }
+.ratings-demo-card small { color: var(--text-faint); font-size: .74rem; }
+.ratings-intro-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin: 0; padding: 0; list-style: none; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--border); overflow: hidden; }
+.ratings-intro-steps li { display: flex; gap: 10px; padding: 13px; background: var(--bg-raised); }
+.ratings-intro-steps i { flex: 0 0 auto; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; background: var(--accent-soft); color: var(--accent-hover); font-size: .7rem; font-style: normal; font-weight: 800; }
+.ratings-intro-steps span { display: grid; gap: 3px; align-content: start; }
+.ratings-intro-steps strong { color: var(--text-strong); font-size: .78rem; }
+.ratings-intro-steps small { color: var(--text-faint); font-size: .7rem; line-height: 1.45; }
+.rating-eligibility-note, .rating-privacy-note { display: grid; gap: 3px; padding: 11px 13px; border-left: 3px solid var(--accent); border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--text-muted); font-size: .76rem; }
+.rating-privacy-note strong { color: var(--text-strong); }
+.ratings-intro-actions, .rating-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+.skill-rating-form { gap: 18px; padding-right: 40px; }
+.rating-dialog-heading { display: grid; gap: 3px; }
+.rating-dialog-heading h2 { margin-top: 3px; font-size: 1.7rem; }
+.rating-dialog-heading p { color: var(--text-faint); font-size: .8rem; }
+.rating-scale-list { display: grid; gap: 9px; }
+.rating-scale { grid-template-columns: minmax(140px, 1fr) auto; gap: 7px 16px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-soft); }
+.rating-scale > span:first-child { display: grid; gap: 2px; }
+.rating-scale > span:first-child strong { color: var(--text-strong); font-size: .86rem; }
+.rating-scale > span:first-child small { color: var(--text-faint); font-size: .7rem; font-weight: 400; }
+.rating-scale output { color: var(--text-strong); font: 600 1.45rem var(--font-serif); font-variant-numeric: tabular-nums; }
+.rating-scale output i { color: var(--text-faint); font: normal .7rem var(--font-sans); }
+.rating-scale input[type='range'] { grid-column: 1 / -1; width: 100%; height: 6px; border: 0; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--accent-soft)); padding: 0; accent-color: var(--accent); cursor: pointer; }
+.rating-scale-ends { grid-column: 1 / -1; display: flex; justify-content: space-between; color: var(--text-faint); }
+.rating-scale-ends small { font-size: .64rem; font-weight: 400; }
+.rating-change-warning { color: var(--text-muted); font-size: .74rem; }
+.rating-form-actions button { min-width: 130px; }
+
+.ratings-analytics-summary { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+.ratings-analytics-summary > div { display: grid; gap: 2px; padding: 12px; border-right: 1px solid var(--border); }
+.ratings-analytics-summary > div:last-child { border: 0; }
+.ratings-analytics-summary strong { color: var(--text-strong); font: 600 1.35rem var(--font-serif); }
+.ratings-analytics-summary span { color: var(--text-faint); font-size: .7rem; text-transform: uppercase; }
+.ratings-loading { padding: 36px; border: 1px dashed var(--border-strong); border-radius: var(--radius-lg); color: var(--text-muted); text-align: center; }
+.ratings-analytics-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-lg); }
+.ratings-analytics-table { width: 100%; min-width: 760px; border-collapse: collapse; }
+.ratings-analytics-table th, .ratings-analytics-table td { padding: 9px 10px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-size: .76rem; text-align: left; vertical-align: top; }
+.ratings-analytics-table th { background: var(--bg-sidebar); color: var(--text-faint); font-size: .66rem; letter-spacing: .05em; text-transform: uppercase; }
+.ratings-analytics-table tr:last-child td { border-bottom: 0; }
+.ratings-analytics-table td strong, .ratings-analytics-table td small { display: block; }
+.ratings-analytics-table td strong { color: var(--text-strong); }
+.ratings-analytics-table td small { color: var(--text-faint); font-size: .68rem; }
+
 .landing-page { min-height: 100vh; background: var(--bg-page); }
 .landing-nav { width: min(1440px, calc(100% - 48px)); min-height: 68px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 24px; border-bottom: 1px solid var(--border); }
 .landing-brand { display: flex; align-items: center; gap: 16px; }
@@ -583,6 +655,16 @@ header:focus-within { transform: translateY(0) !important; }
   .program-disclosure > .program-filter-strip { padding: 8px 0 18px; border-bottom: 0; }
   .program-disclosure .filter-chip-row { width: 100%; }
   .directory-result-heading { padding-top: 34px; }
+  .ratings-intro, .ratings-analytics, .skill-rating-form { padding-right: 28px; }
+  .ratings-intro-steps { grid-template-columns: 1fr; }
+  .ratings-intro-actions, .rating-form-actions { align-items: stretch; flex-direction: column-reverse; }
+  .ratings-intro-actions button, .rating-form-actions button { width: 100%; }
+  .skill-rating-scores { gap: 5px; }
+  .skill-rating-scores > span { display: grid; grid-template-columns: 1fr; }
+  .skill-rating-scores strong { margin: 0; }
+  .ratings-analytics-summary { grid-template-columns: 1fr; }
+  .ratings-analytics-summary > div { border-right: 0; border-bottom: 1px solid var(--border); }
+  .ratings-analytics-summary > div:last-child { border-bottom: 0; }
 }
 
 @media (min-width: 601px) {

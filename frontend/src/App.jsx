@@ -28,6 +28,12 @@ import { ConvertToPpo } from './components/ConvertToPpo';
 import { CompanyForm } from './components/CompanyForm';
 import { StudentForm } from './components/StudentForm';
 import { LoginScreen } from './components/LoginScreen';
+import {
+  RatingsAnalytics,
+  RatingsIntro,
+  SkillRatingForm,
+  SkillRatingSummary,
+} from './components/SkillRatings';
 import { ViewerAccessSettings } from './components/ViewerAccessSettings';
 import { BRANCH_OPTIONS, branchToken, companyRecruitsDegree, formatBranchToken } from './lib/branches';
 import {
@@ -48,6 +54,7 @@ const PlacementCalendarAdmin = lazy(() => import('./PlacementCalendarAdmin'));
 
 const assetBase = import.meta.env.BASE_URL || '/';
 const VIEWER_TOKEN_STORAGE_KEY = 'viewerToken';
+const RATINGS_INTRO_VERSION = 'skill-ratings-v1';
 const COMPANY_SORT_FIELDS = new Set(['name', 'ctc', 'stipend', 'totalHired', 'offer_date']);
 const STUDENT_SORT_FIELDS = new Set(['roll_number', 'name', 'ctc', 'stipend', 'offer_date']);
 const VIEW_MODES = new Set(['cards', 'table']);
@@ -291,6 +298,11 @@ const App = () => {
     setStats({});
     setCompanies([]);
     setStudents([]);
+    setSessionDetails(null);
+    setShowRatingsIntro(false);
+    setRatingStudent(null);
+    setMyRatings({});
+    setShowRatingsAnalytics(false);
     setDataUpdatedAt(null);
     setLoadedBatchKey(null);
   };
@@ -299,6 +311,13 @@ const App = () => {
   const [editCompany, setEditCompany] = useState(null);
   const [showStudentModal, setShowStudentModal] = useState(false);
   const [editStudent, setEditStudent] = useState(null);
+  const [sessionDetails, setSessionDetails] = useState(null);
+  const [showRatingsIntro, setShowRatingsIntro] = useState(false);
+  const [ratingStudent, setRatingStudent] = useState(null);
+  const [myRatings, setMyRatings] = useState({});
+  const [ratingBusy, setRatingBusy] = useState(false);
+  const [ratingError, setRatingError] = useState('');
+  const [showRatingsAnalytics, setShowRatingsAnalytics] = useState(false);
 
   // Companies page: search, sort, filter, detail
   const [companySearch, setCompanySearch] = useState(initialCompanyQuery.search);
@@ -475,6 +494,7 @@ const App = () => {
   useEffect(() => {
     if (!viewerToken) {
       setToken('');
+      setSessionDetails(null);
       setSessionChecking(false);
       return;
     }
@@ -485,6 +505,9 @@ const App = () => {
       .then((response) => {
         if (!active) return;
         setToken(response.data.is_admin ? viewerToken : '');
+        setSessionDetails(response.data);
+        const introKey = `${RATINGS_INTRO_VERSION}:${response.data.ratings_account_id || 'viewer'}`;
+        if (!localStorage.getItem(introKey)) setShowRatingsIntro(true);
       })
       .catch(() => {
         if (!active) return;
@@ -500,6 +523,26 @@ const App = () => {
   }, [viewerHeaders, viewerToken]);
 
   useEffect(() => {
+    if (!sessionDetails?.can_rate || !viewerToken) {
+      setMyRatings({});
+      return undefined;
+    }
+
+    let active = true;
+    api.get('/ratings/mine', viewerHeaders)
+      .then((response) => {
+        if (!active) return;
+        setMyRatings(Object.fromEntries(
+          (response.data || []).map((rating) => [String(rating.target_student_id), rating])
+        ));
+      })
+      .catch(() => {
+        if (active) setMyRatings({});
+      });
+    return () => { active = false; };
+  }, [sessionDetails?.can_rate, viewerHeaders, viewerToken]);
+
+  useEffect(() => {
     const handleStorageChange = (event) => {
       if (event.key !== VIEWER_TOKEN_STORAGE_KEY) return;
 
@@ -507,6 +550,10 @@ const App = () => {
       setViewerToken(nextToken);
       if (!nextToken) {
         setToken('');
+        setSessionDetails(null);
+        setShowRatingsIntro(false);
+        setRatingStudent(null);
+        setShowRatingsAnalytics(false);
         BATCHES.forEach((batch) => sessionStorage.removeItem(getBatchCacheKey(batch.key)));
         setStats({});
         setCompanies([]);
@@ -719,6 +766,74 @@ const App = () => {
   const closeStudentDetail = () => {
     setSelectedStudent(null);
     setSelectedStudentId('');
+  };
+
+  const ratingsIntroStorageKey = sessionDetails?.ratings_account_id
+    ? `${RATINGS_INTRO_VERSION}:${sessionDetails.ratings_account_id}`
+    : '';
+
+  const dismissRatingsIntro = () => {
+    if (ratingsIntroStorageKey) localStorage.setItem(ratingsIntroStorageKey, 'seen');
+    setShowRatingsIntro(false);
+  };
+
+  const openSkillRating = (student) => {
+    if (!sessionDetails?.can_rate) {
+      window.alert('Skill ratings require your individual IIIT Delhi Google sign-in. Shared viewer access can see averages only.');
+      return;
+    }
+    closeStudentDetail();
+    setRatingError('');
+    setRatingStudent(student);
+  };
+
+  const saveSkillRating = async (scores) => {
+    if (!ratingStudent || !sessionDetails?.can_rate) return;
+    const existing = myRatings[String(ratingStudent.id)];
+    let confirmUpdate = Boolean(existing);
+
+    if (existing) {
+      const confirmed = window.confirm(
+        `Change your saved rating for ${ratingStudent.name}? The new Overall, DSA, and ML scores will replace your previous scores.`
+      );
+      if (!confirmed) return;
+    }
+
+    setRatingBusy(true);
+    setRatingError('');
+    try {
+      let response;
+      try {
+        response = await api.put(
+          `/ratings/${ratingStudent.id}`,
+          { ...scores, confirm_update: confirmUpdate },
+          viewerHeaders
+        );
+      } catch (err) {
+        if (err.response?.status !== 409 || !err.response?.data?.confirmation_required || confirmUpdate) throw err;
+        const confirmed = window.confirm(
+          `A rating for ${ratingStudent.name} already exists. Confirm that you want to replace it with these new scores.`
+        );
+        if (!confirmed) return;
+        confirmUpdate = true;
+        response = await api.put(
+          `/ratings/${ratingStudent.id}`,
+          { ...scores, confirm_update: true },
+          viewerHeaders
+        );
+      }
+
+      setMyRatings((current) => ({
+        ...current,
+        [String(ratingStudent.id)]: response.data,
+      }));
+      setRatingStudent(null);
+      refresh();
+    } catch (err) {
+      setRatingError(err.response?.data?.message || 'Your rating could not be saved.');
+    } finally {
+      setRatingBusy(false);
+    }
   };
 
   const handleBatchChange = (batchKey) => {
@@ -2220,6 +2335,16 @@ const App = () => {
                 <div className="directory-hero-copy">
                   <h1>Students</h1>
                   <p>{activeBatch.label} · {studentOverview.total} records across {studentOverview.programs} programs</p>
+                  <div className="ratings-hero-actions">
+                    {sessionDetails?.can_rate && sessionDetails.self_student && (
+                      <button type="button" onClick={() => openSkillRating(sessionDetails.self_student)}>Rate myself</button>
+                    )}
+                    {isAdmin && (
+                      <button type="button" className="secondary" onClick={() => setShowRatingsAnalytics(true)}>
+                        Ratings analytics
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="student-hero-outcome">
                   <DonutChart value={studentOverview.placed} total={studentOverview.eligible} label="Visible placement rate" detail={`${studentOverview.placed} placed`} />
@@ -2332,6 +2457,7 @@ const App = () => {
                         <th>Offer type</th>
                         <th>Best CTC</th>
                         <th>Latest offer</th>
+                        <th>Skill ratings</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2350,6 +2476,14 @@ const App = () => {
                             <td>{offers.map((offer) => offer.offer_type).filter(Boolean).join(' · ') || '—'}</td>
                             <td>{formatInr(highestCtc || null, 'p.a.')}</td>
                             <td>{formatDate(latestOffer)}</td>
+                            <td>
+                              <div className="table-rating-cell">
+                                <SkillRatingSummary student={student} compact />
+                                <button type="button" className="text-button" onClick={() => openSkillRating(student)}>
+                                  {myRatings[String(student.id)] ? 'Change mine' : 'Rate skills'}
+                                </button>
+                              </div>
+                            </td>
                           </tr>
                         );
                       })}
@@ -2382,6 +2516,12 @@ const App = () => {
                         <div><dt>Type</dt><dd>{offerTypes.join(' · ') || '—'}</dd></div>
                         <div><dt>Latest</dt><dd>{latestOffer ? formatDate(latestOffer) : '—'}</dd></div>
                       </dl>
+                      <div className="student-card-rating">
+                        <SkillRatingSummary student={student} compact />
+                        <button type="button" className="secondary" onClick={() => openSkillRating(student)}>
+                          {myRatings[String(student.id)] ? 'Change my rating' : 'Rate skills'}
+                        </button>
+                      </div>
                       <div className="student-card-chips">
                         {companyNames.length
                           ? companyNames.map((name, index) => <span key={`${name}-${index}`}>{name}</span>)
@@ -2418,7 +2558,11 @@ const App = () => {
                         <button type="button" className="secondary" onClick={() => moveSelectedStudent(-1)} disabled={filteredStudents.length < 2}>Previous</button>
                         <button type="button" className="secondary" onClick={() => moveSelectedStudent(1)} disabled={filteredStudents.length < 2}>Next</button>
                         <button type="button" className="secondary" onClick={copyCurrentLink}>Copy link</button>
+                        <button type="button" onClick={() => openSkillRating(selectedStudent)}>
+                          {myRatings[String(selectedStudent.id)] ? 'Change my rating' : 'Rate skills'}
+                        </button>
                       </div>
+                      <SkillRatingSummary student={selectedStudent} />
                       <div className="offer-timeline">
                         {offers.length ? offers.map((offer, index) => (
                           <article key={offer.id || index}>
@@ -2453,6 +2597,38 @@ const App = () => {
         />
       </Routes>
       )}
+      <RatingsIntro
+        open={showRatingsIntro}
+        canRate={Boolean(sessionDetails?.can_rate)}
+        selfStudent={sessionDetails?.self_student}
+        onClose={dismissRatingsIntro}
+        onRateSelf={() => {
+          const selfStudent = sessionDetails?.self_student;
+          dismissRatingsIntro();
+          if (selfStudent) openSkillRating(selfStudent);
+        }}
+        onBrowse={() => {
+          dismissRatingsIntro();
+          navigate('/students');
+        }}
+      />
+      <Modal open={!!ratingStudent} onClose={() => !ratingBusy && setRatingStudent(null)} label={ratingStudent ? `Rate ${ratingStudent.name}` : 'Rate student skills'}>
+        {ratingStudent && (
+          <SkillRatingForm
+            student={ratingStudent}
+            existing={myRatings[String(ratingStudent.id)]}
+            onSubmit={saveSkillRating}
+            onCancel={() => setRatingStudent(null)}
+            busy={ratingBusy}
+            error={ratingError}
+          />
+        )}
+      </Modal>
+      <RatingsAnalytics
+        open={showRatingsAnalytics}
+        onClose={() => setShowRatingsAnalytics(false)}
+        authHeaders={authHeaders}
+      />
     </>
   );
 };

@@ -14,7 +14,8 @@
     "import:batches": "node scripts/import-batches.js",
     "import:btech-latest": "node scripts/import-btech-latest-placements.js",
     "fix:summer-intern-status": "node scripts/fix-summer-intern-placement-status.js",
-    "migrate:company-cycles": "node scripts/migrate-companies-to-cycles.js"
+    "migrate:company-cycles": "node scripts/migrate-companies-to-cycles.js",
+    "backfill:rating-identities": "node scripts/backfill-rating-identities.js"
   },
   "dependencies": {
     "argon2": "^0.44.0",

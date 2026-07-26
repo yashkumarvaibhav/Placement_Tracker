@@ -56,6 +56,24 @@ export const initDb = async () => {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );`);
 
+  await query(`CREATE TABLE IF NOT EXISTS student_rating_identities (
+      email TEXT PRIMARY KEY,
+      student_id BIGINT UNIQUE NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );`);
+
+  await query(`CREATE TABLE IF NOT EXISTS skill_ratings (
+      id BIGSERIAL PRIMARY KEY,
+      rater_email TEXT NOT NULL,
+      target_student_id BIGINT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      overall SMALLINT NOT NULL CHECK(overall BETWEEN 1 AND 10),
+      dsa SMALLINT NOT NULL CHECK(dsa BETWEEN 1 AND 10),
+      ml SMALLINT NOT NULL CHECK(ml BETWEEN 1 AND 10),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(rater_email, target_student_id)
+    );`);
+
   await query(`CREATE TABLE IF NOT EXISTS placement_calendar_snapshots (
       id BIGSERIAL PRIMARY KEY,
       version INTEGER UNIQUE NOT NULL,
@@ -152,6 +170,8 @@ export const initDb = async () => {
   await query('CREATE INDEX IF NOT EXISTS idx_companies_batch_key ON companies(batch_key);');
   await query('CREATE INDEX IF NOT EXISTS idx_students_batch_key ON students(batch_key);');
   await query('CREATE UNIQUE INDEX IF NOT EXISTS idx_students_batch_roll_unique ON students(batch_key, roll_number);');
+  await query('CREATE INDEX IF NOT EXISTS idx_skill_ratings_target ON skill_ratings(target_student_id);');
+  await query('CREATE INDEX IF NOT EXISTS idx_skill_ratings_rater ON skill_ratings(rater_email);');
 };
 
 const backfillOffers = async () => {
@@ -181,11 +201,12 @@ const backfillOffers = async () => {
 export const ensureOfferBackfill = backfillOffers;
 
 export const getTableCounts = async () => {
-  const [companies, students, offers, calendarSnapshots] = await Promise.all([
+  const [companies, students, offers, calendarSnapshots, skillRatings] = await Promise.all([
     query('SELECT count(*)::int AS count FROM companies'),
     query('SELECT count(*)::int AS count FROM students'),
     query('SELECT count(*)::int AS count FROM offers'),
     query('SELECT count(*)::int AS count FROM placement_calendar_snapshots'),
+    query('SELECT count(*)::int AS count FROM skill_ratings'),
   ]);
 
   return {
@@ -193,5 +214,6 @@ export const getTableCounts = async () => {
     students: students.rows[0]?.count ?? 0,
     offers: offers.rows[0]?.count ?? 0,
     placement_calendar_snapshots: calendarSnapshots.rows[0]?.count ?? 0,
+    skill_ratings: skillRatings.rows[0]?.count ?? 0,
   };
 };

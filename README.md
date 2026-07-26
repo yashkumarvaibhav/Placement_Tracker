@@ -42,7 +42,10 @@ npm run dev             # http://localhost:5173/
 - Google sign-in is verified by the backend against `GOOGLE_CLIENT_ID` and the `iiitd.ac.in` hosted domain.
 - Initial shared viewer credentials are configured with `VIEWER_USERNAME` and `VIEWER_PASSWORD`, then seeded into the database as an Argon2id hash.
 - An authenticated admin can replace the shared viewer username and password from the Admin page. Updated passwords are stored as Argon2id hashes.
-- The email address is used transiently for domain verification. It is not stored, logged, or returned to the frontend.
+- Google email addresses are used for domain verification and a private roster-to-account
+  mapping supports self-rating. A submitted rating keeps its email attribution for audit,
+  visible only in the admin-only Ratings analytics screen; viewer-facing APIs expose only
+  averages and rating counts.
 - Read access to placement data requires a signed viewer session. Configure a stable `SESSION_SECRET` in `backend/.env`.
 
 ## Admin login

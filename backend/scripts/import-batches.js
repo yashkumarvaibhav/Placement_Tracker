@@ -137,10 +137,30 @@ const upsertStudent = async (client, batchConfig, student) => {
         batchConfig.graduation_year,
       ]
     );
+    const inserted = await client.query(
+      `SELECT id FROM students WHERE batch_key = $1 AND roll_number = $2 LIMIT 1`,
+      [batchConfig.batch_key, student.roll_number]
+    );
+    if (student.email && inserted.rows[0]?.id) {
+      await client.query(
+        `INSERT INTO student_rating_identities (email, student_id)
+         VALUES ($1, $2)
+         ON CONFLICT (email) DO UPDATE SET student_id = EXCLUDED.student_id`,
+        [student.email, inserted.rows[0].id]
+      );
+    }
     return { created: 1, updated: 0, preserved: 0 };
   }
 
   const row = existing.rows[0];
+  if (student.email) {
+    await client.query(
+      `INSERT INTO student_rating_identities (email, student_id)
+       VALUES ($1, $2)
+       ON CONFLICT (email) DO UPDATE SET student_id = EXCLUDED.student_id`,
+      [student.email, row.id]
+    );
+  }
   const preservePlacement = row.placement_status === 'Placed' || row.company_id !== null;
 
   await client.query(
