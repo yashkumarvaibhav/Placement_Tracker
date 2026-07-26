@@ -73,7 +73,10 @@ router.post('/viewer', authRateLimiter, requireDbReady, async (req, res) => {
 router.get('/session', requireViewerAuth, async (req, res, next) => {
   try {
     const email = getRatingEmail(req);
-    const selfStudent = email ? await getRatingViewerContext(email) : null;
+    const ratingIdentity = email ? await getRatingViewerContext(email) : null;
+    const selfStudent = ratingIdentity
+      ? { ...ratingIdentity, id: ratingIdentity.id ?? ratingIdentity.student_id }
+      : null;
     return res.json({
       valid: true,
       is_admin: isValidAdminSession(bearerToken(req)),

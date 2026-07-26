@@ -782,9 +782,14 @@ const App = () => {
       window.alert('Skill ratings require your individual IIIT Delhi Google sign-in. Shared viewer access can see averages only.');
       return;
     }
+    const studentId = student?.id ?? student?.student_id;
+    if (!studentId) {
+      window.alert('This student record could not be identified. Please refresh the page and try again.');
+      return;
+    }
     closeStudentDetail();
     setRatingError('');
-    setRatingStudent(student);
+    setRatingStudent({ ...student, id: studentId });
   };
 
   const saveSkillRating = async (scores) => {

@@ -2,7 +2,7 @@ import { query, transaction } from './client.js';
 
 export const getRatingViewerContext = async (email) => {
   const { rows } = await query(
-    `SELECT sri.student_id, s.name, s.roll_number, s.program, s.batch_key, s.degree, s.graduation_year
+    `SELECT sri.student_id AS id, s.name, s.roll_number, s.program, s.batch_key, s.degree, s.graduation_year
      FROM student_rating_identities sri
      JOIN students s ON s.id = sri.student_id
      WHERE sri.email = $1

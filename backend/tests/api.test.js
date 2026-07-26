@@ -164,6 +164,22 @@ describe('request validation policy', () => {
 describe('skill ratings privacy and update policy', () => {
   const asGoogleViewer = () => `Bearer ${createViewerSession('peer25001@iiitd.ac.in')}`;
 
+  it('normalizes the signed-in viewer identity to the student id expected by the rating UI', async () => {
+    db.getRatingViewerContext.mockResolvedValueOnce({
+      student_id: 423,
+      name: 'Yash Kumar Vaibhav',
+      roll_number: 'MT25091',
+    });
+    const res = await request(app)
+      .get('/api/auth/session')
+      .set('Authorization', asGoogleViewer());
+    expect(res.status).toBe(200);
+    expect(res.body.self_student).toEqual(expect.objectContaining({
+      id: 423,
+      name: 'Yash Kumar Vaibhav',
+    }));
+  });
+
   it('does not let an unidentifiable shared viewer submit ratings', async () => {
     const res = await request(app)
       .put('/api/ratings/1')

@@ -73,7 +73,6 @@ const SkillRatingForm = ({
 
       <div className="rating-privacy-note">
         <strong>Your name stays hidden from viewers.</strong>
-        <span>Only averages and the number of ratings are public. Admins can audit who submitted each rating.</span>
       </div>
 
       <div className="rating-scale-list">
