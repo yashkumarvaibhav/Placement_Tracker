@@ -122,7 +122,12 @@ const RatingsIntro = ({
   onRateSelf,
   onBrowse,
 }) => (
-  <Modal open={open} onClose={onClose} label="New skill ratings walkthrough">
+  <Modal
+    open={open}
+    onClose={onClose}
+    label="New skill ratings walkthrough"
+    dismissText="Skip"
+  >
     <div className="ratings-intro">
       <span className="eyebrow">New in Placement Atlas</span>
       <h2>Recognise the skills in your batch</h2>

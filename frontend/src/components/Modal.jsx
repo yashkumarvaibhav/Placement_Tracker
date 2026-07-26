@@ -2,7 +2,13 @@ import React, { useEffect, useRef } from 'react';
 
 const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-const Modal = ({ open, onClose, label = 'Dialog', children }) => {
+const Modal = ({
+  open,
+  onClose,
+  label = 'Dialog',
+  dismissText = '',
+  children,
+}) => {
   const dialogRef = useRef(null);
   const lastFocused = useRef(null);
   // Read onClose through a ref so the focus-trap effect only re-runs when the
@@ -61,7 +67,7 @@ const Modal = ({ open, onClose, label = 'Dialog', children }) => {
   return (
     <div className="dialog-backdrop" onClick={onClose}>
       <div
-        className="dialog"
+        className={dismissText ? 'dialog dialog-with-text-dismiss' : 'dialog'}
         role="dialog"
         aria-modal="true"
         aria-label={label}
@@ -69,7 +75,14 @@ const Modal = ({ open, onClose, label = 'Dialog', children }) => {
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
       >
-        <button type="button" className="dialog-close" aria-label="Close dialog" onClick={onClose}>×</button>
+        <button
+          type="button"
+          className={dismissText ? 'dialog-close dialog-close-text' : 'dialog-close'}
+          aria-label={dismissText ? `${dismissText} ${label}` : `Close ${label}`}
+          onClick={onClose}
+        >
+          {dismissText || '×'}
+        </button>
         {children}
       </div>
     </div>
