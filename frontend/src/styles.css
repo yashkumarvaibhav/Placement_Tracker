@@ -386,7 +386,7 @@ header:focus-within { transform: translateY(0) !important; }
 .student-directory-hero { grid-template-columns: 1.35fr .65fr; }.student-hero-outcome { justify-self: center; }
 .program-filter-strip { display: flex; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--border); }.program-filter-strip .filter-chip-row { flex: 1; }
 .student-result-heading { align-items: end; }.student-result-heading .sort-control { min-width: 180px; }
-.student-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(288px, 1fr)); gap: 12px; }
+.student-card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .student-card { --student-hover: var(--bg-hover); min-width: 0; border: 1px solid var(--border); border-left: 4px solid transparent; border-radius: var(--radius-lg); background: var(--bg-raised); overflow: hidden; transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease; }
 .student-card:hover { border-color: var(--border-strong); transform: translateY(-2px); box-shadow: var(--shadow); }
 .student-card-placed { border-left-color: var(--status-sent); --student-hover: var(--surface-green); }
@@ -627,6 +627,7 @@ header:focus-within { transform: translateY(0) !important; }
 
 @media (max-width: 920px) {
   .editorial-hero { grid-template-columns: 1fr; gap: 20px; }.hero-outcome-panel { width: min(440px, 100%); }
+  .student-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 850px) {
@@ -658,6 +659,7 @@ header:focus-within { transform: translateY(0) !important; }
   .program-disclosure > .program-filter-strip { padding: 8px 0 18px; border-bottom: 0; }
   .program-disclosure .filter-chip-row { width: 100%; }
   .directory-result-heading { padding-top: 34px; }
+  .student-card-grid { grid-template-columns: 1fr; }
   .ratings-intro, .ratings-analytics, .skill-rating-form { padding-right: 28px; }
   .ratings-intro-steps { grid-template-columns: 1fr; }
   .ratings-intro-actions, .rating-form-actions { align-items: stretch; flex-direction: column-reverse; }
