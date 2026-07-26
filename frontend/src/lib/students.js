@@ -74,9 +74,27 @@ const buildProgramSummaries = (students, placementsOnly = false) => {
   const mixedDegrees = new Set(students.map((student) => student.degree).filter(Boolean)).size > 1;
   const programLabel = (student) => (mixedDegrees && student.degree ? `${student.degree} ${student.program}` : student.program);
 
-  const offersWithProgram = students.flatMap((student) => (
-    getStudentOffers(student).map((offer) => ({ ...offer, program: student.program, programLabel: programLabel(student) }))
+  const offersWithProgram = students.flatMap((student, index) => (
+    getStudentOffers(student).map((offer) => ({
+      ...offer,
+      studentKey: student.id ?? `row-${index}`,
+      program: student.program,
+      programLabel: programLabel(student),
+    }))
   ));
+
+  // Compensation is a per-student statistic: a student with several offers is represented once,
+  // by their best package, so a second (lower) offer cannot drag the mean or median down.
+  const bestValuePerStudent = (offers, field, companyField) => {
+    const best = new Map();
+    offers.forEach((offer) => {
+      const value = offer[field] ?? offer[companyField];
+      if (typeof value !== 'number') return;
+      const current = best.get(offer.studentKey);
+      if (current === undefined || value > current) best.set(offer.studentKey, value);
+    });
+    return [...best.values()];
+  };
 
   const median = (values) => {
     if (!values.length) return null;
@@ -107,12 +125,8 @@ const buildProgramSummaries = (students, placementsOnly = false) => {
       else if (category === 'B') categories.B += 1;
     });
 
-    const ctcValues = offersSubset
-      .map((offer) => offer.ctc ?? offer.company_ctc)
-      .filter((value) => typeof value === 'number');
-    const stipendValues = offersSubset
-      .map((offer) => offer.stipend ?? offer.company_stipend)
-      .filter((value) => typeof value === 'number');
+    const ctcValues = bestValuePerStudent(offersSubset, 'ctc', 'company_ctc');
+    const stipendValues = bestValuePerStudent(offersSubset, 'stipend', 'company_stipend');
 
     const internshipCount = internOffers.length + comboOffers.length;
     const fteCount = fteOffers.length + comboOffers.length;

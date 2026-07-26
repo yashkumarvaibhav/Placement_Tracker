@@ -133,6 +133,19 @@ export const buildStats = async (batchKey = DEFAULT_BATCH_KEY, graduationYear = 
 
   const average = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
 
+  // Compensation is a per-student statistic: a student with several offers is represented once,
+  // by their best package, so a second (lower) offer cannot drag the mean or median down.
+  const bestValuePerStudent = (offerRows, field, companyField) => {
+    const best = new Map();
+    for (const offer of offerRows) {
+      const value = offer[field] ?? offer[companyField];
+      if (typeof value !== 'number') continue;
+      const current = best.get(offer.student_id);
+      if (current === undefined || value > current) best.set(offer.student_id, value);
+    }
+    return [...best.values()];
+  };
+
   const toPct = (num, den) => (den ? Number(((num / den) * 100).toFixed(2)) : 0);
 
   const isIncludedInPlacementRate = (student) => !['not sitting', 'ineligible'].includes(
@@ -162,12 +175,8 @@ export const buildStats = async (batchKey = DEFAULT_BATCH_KEY, graduationYear = 
       else if (cat.toUpperCase() === 'B') byCategory.B += 1;
     }
 
-    const ctcValues = offersSubset
-      .map((o) => o.ctc ?? o.company_ctc)
-      .filter((v) => typeof v === 'number');
-    const stipendValues = offersSubset
-      .map((o) => o.stipend ?? o.company_stipend)
-      .filter((v) => typeof v === 'number');
+    const ctcValues = bestValuePerStudent(offersSubset, 'ctc', 'company_ctc');
+    const stipendValues = bestValuePerStudent(offersSubset, 'stipend', 'company_stipend');
 
     const internCount = internSub.length + comboSub.length;
     const fteCount = fteSub.length + comboSub.length;

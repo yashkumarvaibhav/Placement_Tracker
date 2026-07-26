@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { GoogleLogin } from '@react-oauth/google';
 import { ThemeToggle } from './ui';
+import { DASHBOARD_TITLE, INSTITUTE, PRODUCT_NAME } from '../institute';
 
 const LoginScreen = ({ assetBase, onSuccess, onError, onViewerLogin, error, pending, themeMode, onToggleTheme }) => {
   const [username, setUsername] = useState('');
@@ -9,8 +10,8 @@ const LoginScreen = ({ assetBase, onSuccess, onError, onViewerLogin, error, pend
   return (
     <main className="landing-page">
     <nav className="landing-nav">
-      <a className="landing-brand" href="#top" aria-label="IIIT Delhi Placement Dashboard home">
-        <span><strong>IIIT Delhi</strong><small>Placement Dashboard</small></span>
+      <a className="landing-brand" href="#top" aria-label={`${PRODUCT_NAME} home`}>
+        <span><strong>{PRODUCT_NAME}</strong><small>{DASHBOARD_TITLE}</small></span>
       </a>
       <div className="landing-nav-actions">
         <span className="unofficial-pill">Unofficial side project</span>
@@ -20,10 +21,10 @@ const LoginScreen = ({ assetBase, onSuccess, onError, onViewerLogin, error, pend
 
     <section id="top" className="landing-hero">
       <div className="landing-hero-copy">
-        <h1>IIIT Delhi Placement Dashboard</h1>
+        <h1>{DASHBOARD_TITLE}</h1>
         <p>Cohort outcomes, recruiter records, and compensation context in one searchable, student-built reference.</p>
         <div className="landing-principles" aria-label="Access and privacy summary">
-          <span><i>01</i> Restricted to IIIT Delhi students</span>
+          <span><i>01</i> Restricted to {INSTITUTE.name} students</span>
           <span><i>02</i> Verified with Google or viewer credentials</span>
           <span><i>03</i> Built for internal, responsible use</span>
         </div>
@@ -36,7 +37,7 @@ const LoginScreen = ({ assetBase, onSuccess, onError, onViewerLogin, error, pend
         <div className="access-card-body">
           <span className="eyebrow">Verified access</span>
           <h2 id="access-heading">Continue with IIITD Google</h2>
-          <p>Use your <strong>@iiitd.ac.in</strong> account to view the placement data.</p>
+          <p>Use your <strong>@{INSTITUTE.domain}</strong> account to view the placement data.</p>
           {error && <div className="error-text access-error" role="alert">{error}</div>}
           <div className={pending ? 'google-login-wrap is-pending' : 'google-login-wrap'}>
             <GoogleLogin
@@ -46,7 +47,7 @@ const LoginScreen = ({ assetBase, onSuccess, onError, onViewerLogin, error, pend
               auto_select={false}
               button_auto_select={false}
               use_fedcm_for_button={false}
-              hd="iiitd.ac.in"
+              hd={INSTITUTE.domain}
               ux_mode="popup"
               text="signin_with"
             />
@@ -103,7 +104,7 @@ const LoginScreen = ({ assetBase, onSuccess, onError, onViewerLogin, error, pend
     </section>
 
     <footer className="landing-footer">
-      <p><strong>Important:</strong> this is an unofficial student side project. It is not operated by, endorsed by, or a substitute for the IIIT Delhi Placement Office.</p>
+      <p><strong>Important:</strong> this is an unofficial student side project. It is not operated by, endorsed by, or a substitute for the {INSTITUTE.name} Placement Office.</p>
       <span>Use the information responsibly and report genuine discrepancies to yash25091@iiitd.ac.in.</span>
     </footer>
     </main>

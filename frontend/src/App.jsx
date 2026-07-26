@@ -41,6 +41,7 @@ import {
   sortPrograms,
 } from './lib/students';
 import { formatDate, formatInr, formatPct, formatRelative } from './lib/format';
+import { DASHBOARD_TITLE, PRODUCT_NAME } from './institute';
 
 // Admin-only bundle: viewers never need the calendar admin page, so load it on demand.
 const PlacementCalendarAdmin = lazy(() => import('./PlacementCalendarAdmin'));
@@ -825,7 +826,7 @@ const App = () => {
   const companyHiringStats = useMemo(() => {
     const stats = companies.reduce((accumulator, company) => {
       const reportedOffers = Number(company.reported_offer_count) || 0;
-      accumulator[company.id] = { total: 0, reported: reportedOffers, CSE: 0, ECE: 0, CB: 0, OTHER: 0, students: [] };
+      accumulator[company.id] = { total: 0, reported: reportedOffers, CSE: 0, ECE: 0, CB: 0, OTHER: 0, programs: {}, students: [] };
       return accumulator;
     }, {});
     students.forEach((s) => {
@@ -833,15 +834,19 @@ const App = () => {
         const cid = o.company_id;
         if (!cid) return;
         const branchGroup = s.branch_group || getBranchGroup(s.program);
-        if (!stats[cid]) stats[cid] = { total: 0, CSE: 0, ECE: 0, CB: 0, OTHER: 0, students: [] };
+        if (!stats[cid]) stats[cid] = { total: 0, CSE: 0, ECE: 0, CB: 0, OTHER: 0, programs: {}, students: [] };
         stats[cid].total++;
         if (stats[cid][branchGroup] !== undefined) stats[cid][branchGroup]++;
         else stats[cid].OTHER++;
+        // Programs are degree-qualified in the Overall view so B.Tech CSE and M.Tech CSE hires
+        // stay distinguishable.
+        const programLabel = s.program ? (isOverallScope && s.degree ? `${s.degree} ${s.program}` : s.program) : null;
+        if (programLabel) stats[cid].programs[programLabel] = (stats[cid].programs[programLabel] || 0) + 1;
         stats[cid].students.push({ name: s.name, roll: s.roll_number, program: s.program, branch_group: branchGroup, offer: o });
       });
     });
     return stats;
-  }, [companies, students]);
+  }, [companies, isOverallScope, students]);
 
   // Filtered and sorted companies
   const filteredCompanies = useMemo(() => {
@@ -1037,10 +1042,15 @@ const App = () => {
       dashboardBranchFilter === 'ALL'
       || getBranchGroup(student.program) === dashboardBranchFilter
     ));
-    const cohortOffers = cohortStudents.flatMap(getStudentOffers);
-    const ctcValues = cohortOffers
-      .map((offer) => Number(offer.ctc ?? offer.company_ctc))
-      .filter((value) => Number.isFinite(value) && value > 0);
+    // One value per student (their best package), matching how the median and average are computed.
+    const ctcValues = cohortStudents
+      .map((student) => {
+        const studentCtcValues = getStudentOffers(student)
+          .map((offer) => Number(offer.ctc ?? offer.company_ctc))
+          .filter((value) => Number.isFinite(value) && value > 0);
+        return studentCtcValues.length ? Math.max(...studentCtcValues) : null;
+      })
+      .filter((value) => value !== null);
     const compensationBands = [
       { label: '< 10 LPA', min: 0, max: 1000000 },
       { label: '10–15 LPA', min: 1000000, max: 1500000 },
@@ -1342,8 +1352,8 @@ const App = () => {
           <div className="nav-brand-row">
             <Link to="/" className="nav-logo" onClick={closeMobileNav}>
               <span className="nav-wordmark">
-                <strong>IIIT Delhi</strong>
-                <small>Placement Dashboard</small>
+                <strong>{PRODUCT_NAME}</strong>
+                <small>{DASHBOARD_TITLE}</small>
               </span>
             </Link>
             <button
@@ -1500,14 +1510,14 @@ const App = () => {
                     <MetricTile label="Official campus placement" value={`${OFFICIAL_2026.campus_placement_percentage.toFixed(2)}%`} note="College-published" />
                     <MetricTile label="Tracker companies" value={stats.number_of_companies ?? 0} note="Recorded on this site" />
                     <MetricTile label="Tracker offers" value={activeOverviewSummary.total_offers || 0} note="Recorded offer rows" />
-                    <MetricTile label="Median CTC" value={formatInr(activeOverviewSummary.median_ctc, 'p.a.')} note="Tracker-derived" />
+                    <MetricTile metricKey="median_ctc" label="Median CTC" value={formatInr(activeOverviewSummary.median_ctc, 'p.a.')} note="Best package per student" />
                   </>
                 ) : (
                   <>
                     <MetricTile label={isPlacementRecordsOnly ? 'Recorded placed' : 'Placed students'} value={activeOverviewSummary.placed_students || 0} note={isPlacementRecordsOnly ? 'Source records only' : `${activeOverviewSummary.eligible_students || 0} eligible`} />
                     <MetricTile label="Companies" value={stats.number_of_companies ?? 0} note="Current cohort" />
                     <MetricTile label="Total offers" value={activeOverviewSummary.total_offers || 0} note="Recorded offer rows" />
-                    <MetricTile label="Median CTC" value={formatInr(activeOverviewSummary.median_ctc, 'p.a.')} note="Tracker-derived" />
+                    <MetricTile metricKey="median_ctc" label="Median CTC" value={formatInr(activeOverviewSummary.median_ctc, 'p.a.')} note="Best package per student" />
                   </>
                 )}
               </section>
@@ -1686,17 +1696,17 @@ const App = () => {
 
               {!isOfficial2025 && dashboardView === 'compensation' && <section className="metric-ledger comp-ledger">
                 <MetricTile metricKey="highest_ctc" label="Highest CTC" value={formatInr(activeOverviewSummary.highest_ctc, 'p.a.')} note="Peak recorded package" />
-                <MetricTile metricKey="median_ctc" label="Median CTC" value={formatInr(activeOverviewSummary.median_ctc, 'p.a.')} note="Middle of recorded offers" />
-                <MetricTile metricKey="average_ctc" label="Average CTC" value={formatInr(activeOverviewSummary.average_ctc, 'p.a.')} note="Mean of recorded offers" />
-                <MetricTile metricKey="median_stipend" label="Median stipend" value={formatInr(activeOverviewSummary.median_stipend, 'p.m.')} note="Middle of recorded stipends" />
-                <MetricTile metricKey="average_stipend" label="Average stipend" value={formatInr(activeOverviewSummary.average_stipend, 'p.m.')} note="Across available stipend data" />
+                <MetricTile metricKey="median_ctc" label="Median CTC" value={formatInr(activeOverviewSummary.median_ctc, 'p.a.')} note="Best package per student" />
+                <MetricTile metricKey="average_ctc" label="Average CTC" value={formatInr(activeOverviewSummary.average_ctc, 'p.a.')} note="Best package per student" />
+                <MetricTile metricKey="median_stipend" label="Median stipend" value={formatInr(activeOverviewSummary.median_stipend, 'p.m.')} note="Best stipend per student" />
+                <MetricTile metricKey="average_stipend" label="Average stipend" value={formatInr(activeOverviewSummary.average_stipend, 'p.m.')} note="Best stipend per student" />
                 <MetricTile metricKey="total_Aplus_offers" label="A+ offers" value={activeOverviewSummary.total_Aplus_offers || 0} note="Premium category outcomes" />
               </section>}
 
               {!isOfficial2025 && dashboardView === 'compensation' && (
                 <section className="dashboard-section compensation-focus-section">
                   <article className="insight-panel compensation-panel">
-                    <div className="panel-heading"><h2>CTC distribution</h2><small>Offers by band</small></div>
+                    <div className="panel-heading"><h2>CTC distribution</h2><small>Students by best package</small></div>
                     <HorizontalBars items={dashboardVisuals.compensationBands} />
                   </article>
                 </section>
@@ -1937,10 +1947,17 @@ const App = () => {
               ) : (
               <section className="company-card-grid">
                 {filteredCompanies.map((company) => {
-                  const hiring = companyHiringStats[company.id] || { total: 0, reported: 0, CSE: 0, ECE: 0, CB: 0 };
+                  const hiring = companyHiringStats[company.id] || { total: 0, reported: 0, CSE: 0, ECE: 0, CB: 0, programs: {} };
                   const showReportedAggregate = !isAggregateOnly && hiring.reported > 0;
                   const categoryClass = String(company.category || 'other').toLowerCase().replace('+', 'plus');
                   const reportedOnly = isAggregateOnly || (!hiring.total && hiring.reported);
+                  const branchHires = ['CSE', 'ECE', 'CB'].filter((branch) => hiring[branch] > 0);
+                  const programHires = Object.entries(hiring.programs || {})
+                    .sort(([leftLabel, leftCount], [rightLabel, rightCount]) => rightCount - leftCount || leftLabel.localeCompare(rightLabel));
+                  // Hide the program line when it would just restate the branch chips (a company
+                  // that only hired from programs named after their branch group).
+                  const programsMirrorBranches = programHires.length === branchHires.length
+                    && programHires.every(([label, count]) => hiring[label] === count);
                   return (
                     <article key={company.id} className={`company-card company-card-${categoryClass}`}>
                       <button type="button" className="company-card-main" onClick={() => openCompanyDetail(company)}>
@@ -1972,8 +1989,11 @@ const App = () => {
                       {!isAggregateOnly && (hiring.total > 0 || showReportedAggregate) && (
                         <div className="company-card-branches">
                           {showReportedAggregate && <span>CSE {hiring.reported} reported</span>}
-                          {['CSE', 'ECE', 'CB'].filter((branch) => hiring[branch] > 0).map((branch) => <span key={branch}>{branch} {hiring[branch]}</span>)}
+                          {branchHires.map((branch) => <span key={branch}>{branch} {hiring[branch]}</span>)}
                         </div>
+                      )}
+                      {!isAggregateOnly && programHires.length > 0 && !programsMirrorBranches && (
+                        <p className="company-card-programs">{programHires.map(([label, count]) => `${label} ${count}`).join(' · ')}</p>
                       )}
                       {isAdmin && <div className="card-admin-actions"><button className="secondary" onClick={() => { setEditCompany(company); setShowCompanyModal(true); }}>Edit</button><button className="danger-button" onClick={() => deleteCompanyAction(company.id)}>Delete</button></div>}
                     </article>
@@ -1996,7 +2016,7 @@ const App = () => {
               {/* Company Detail Modal */}
               <Modal open={!!selectedCompany} onClose={closeCompanyDetail} label={selectedCompany ? `${selectedCompany.name} details` : 'Company details'}>
                 {selectedCompany && (() => {
-                  const stats = companyHiringStats[selectedCompany.id] || { total: 0, reported: 0, CSE: 0, ECE: 0, CB: 0, OTHER: 0, students: [] };
+                  const stats = companyHiringStats[selectedCompany.id] || { total: 0, reported: 0, CSE: 0, ECE: 0, CB: 0, OTHER: 0, programs: {}, students: [] };
                   return (
                     <div className="company-detail">
                       <div className="detail-hero-row">
@@ -2098,6 +2118,13 @@ const App = () => {
                           <div className="label">CB</div>
                         </div>}
                       </div>
+                      {!isAggregateOnly && Object.keys(stats.programs || {}).length > 0 && (
+                        <div className="company-card-branches detail-program-chips">
+                          {Object.entries(stats.programs)
+                            .sort(([leftLabel, leftCount], [rightLabel, rightCount]) => rightCount - leftCount || leftLabel.localeCompare(rightLabel))
+                            .map(([label, count]) => <span key={label}>{label} {count}</span>)}
+                        </div>
+                      )}
 
                       {!isAggregateOnly && stats.students.length > 0 && (
                         <>
@@ -2296,7 +2323,7 @@ const App = () => {
                 <div><h2>{filteredStudents.length} students</h2>{dataUpdatedAt && <span className="data-updated-note" title={`Data as of ${formatDate(dataUpdatedAt)}`}>Updated {formatRelative(dataUpdatedAt)}</span>}</div>
                 <div className="result-actions">
                   <div className="view-toggle" aria-label="Student view mode">
-                    <button type="button" className={studentView === 'cards' ? 'active' : ''} aria-pressed={studentView === 'cards'} onClick={() => setStudentView('cards')}>List</button>
+                    <button type="button" className={studentView === 'cards' ? 'active' : ''} aria-pressed={studentView === 'cards'} onClick={() => setStudentView('cards')}>Cards</button>
                     <button type="button" className={studentView === 'table' ? 'active' : ''} aria-pressed={studentView === 'table'} onClick={() => setStudentView('table')}>Table</button>
                   </div>
                   <button type="button" className="text-button" onClick={() => setStudentSort((current) => ({ ...current, asc: !current.asc }))}>{studentSort.asc ? 'Ascending' : 'Descending'} <SortIcon field={studentSort.field} current={studentSort} /></button>
@@ -2342,28 +2369,36 @@ const App = () => {
                   {!filteredStudents.length && <div className="empty-directory-state"><h3>No student records found.</h3><p>{studentSearch || studentFilters.branchGroup || studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0 ? 'No student matches the active filters.' : 'No student records are available for this cohort yet.'}</p>{(studentSearch || studentFilters.branchGroup || studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0) && <button type="button" className="secondary" onClick={() => { setStudentSearch(''); setStudentFilters(DEFAULT_STUDENT_FILTERS); }}>Clear filters</button>}</div>}
                 </section>
               ) : (
-              <section className="student-directory-list">
+              <section className="student-card-grid">
                 {filteredStudents.map((student) => {
                   const offers = getStudentOffers(student);
                   const highestCtc = Math.max(...offers.map((offer) => Number(offer.ctc ?? offer.company_ctc) || 0), 0);
                   const companyNames = offers.map((offer) => offer.company_name).filter(Boolean);
                   const latestOffer = offers.map((offer) => offer.offer_date || offer.company_offer_date).filter(Boolean).sort((a, b) => new Date(b) - new Date(a))[0];
                   const statusClass = String(student.placement_status || 'unknown').toLowerCase().replace(/\s+/g, '-');
+                  const offerTypes = [...new Set(offers.map((offer) => offer.offer_type).filter(Boolean))];
                   return (
-                    <article key={student.id} className={`student-profile-row student-profile-${statusClass}`}>
-                      <button type="button" className="student-profile-main" onClick={() => openStudentDetail(student)}>
+                    <article key={student.id} className={`student-card student-card-${statusClass}`}>
+                      <button type="button" className="student-card-main" onClick={() => openStudentDetail(student)}>
                         <span className="student-avatar">{initialsFor(student.name)}</span>
-                        <span className="student-identity"><strong>{student.name}</strong><small>{student.roll_number} · {student.program}</small></span>
+                        <span className="student-card-copy">
+                          <strong>{student.name}</strong>
+                          <small>{student.roll_number} · {student.program}</small>
+                        </span>
                         <StatusPill status={student.placement_status} />
                       </button>
-                      <div className="student-offer-summary">
-                        {companyNames.length ? (
-                          <><span className="offer-company-stack">{companyNames.slice(0, 2).join(' · ')}{companyNames.length > 2 ? ` +${companyNames.length - 2}` : ''}</span><small>{[offers.map((offer) => offer.offer_type).filter(Boolean).join(' · '), latestOffer ? formatDate(latestOffer) : null].filter(Boolean).join(' · ')}</small></>
-                        ) : <span className="no-offer-copy">No recorded offer yet</span>}
+                      <dl className="student-card-facts">
+                        <div><dt>Best CTC</dt><dd>{formatInr(highestCtc || null, 'p.a.')}</dd></div>
+                        <div><dt>Offers</dt><dd>{offers.length || '—'}</dd></div>
+                        <div><dt>Type</dt><dd>{offerTypes.join(' · ') || '—'}</dd></div>
+                        <div><dt>Latest</dt><dd>{latestOffer ? formatDate(latestOffer) : '—'}</dd></div>
+                      </dl>
+                      <div className="student-card-chips">
+                        {companyNames.length
+                          ? companyNames.map((name, index) => <span key={`${name}-${index}`}>{name}</span>)
+                          : <span className="no-offer-chip">No recorded offer yet</span>}
                       </div>
-                      <div className="student-compensation"><span>Best CTC</span><strong>{formatInr(highestCtc || null, 'p.a.')}</strong></div>
-                      <button type="button" className="row-open-button" aria-label={`Open ${student.name}`} onClick={() => openStudentDetail(student)}>→</button>
-                      {isAdmin && <div className="row-admin-actions"><button className="secondary" onClick={() => { setEditStudent(student); setShowStudentModal(true); }}>Edit</button><button className="danger-button" onClick={() => deleteStudentAction(student.id)}>Delete</button></div>}
+                      {isAdmin && <div className="card-admin-actions"><button className="secondary" onClick={() => { setEditStudent(student); setShowStudentModal(true); }}>Edit</button><button className="danger-button" onClick={() => deleteStudentAction(student.id)}>Delete</button></div>}
                     </article>
                   );
                 })}
