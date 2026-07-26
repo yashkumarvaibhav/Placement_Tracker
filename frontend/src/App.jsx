@@ -739,9 +739,11 @@ const App = () => {
   const handleCycleChange = (year) => {
     const cycle = CYCLES.find((entry) => entry.year === year);
     if (!cycle) return;
-    // Multi-degree cycles default to Overall (the cycle is the parent); single-degree cycles
-    // (e.g. the M.Tech-CSE aggregates) go straight to their one degree.
-    const key = cycle.batches.length >= 2 ? `cycle-${year}` : cycle.batches[0].key;
+    // Keep the degree the reader is already on when the new year offers it; otherwise multi-degree
+    // cycles fall back to Overall (the cycle is the parent) and single-degree cycles (e.g. the
+    // M.Tech-CSE aggregates) go straight to their one degree.
+    const sameDegree = cycle.batches.find((batch) => batch.degree === activeBatch.degree);
+    const key = sameDegree ? sameDegree.key : cycle.batches.length >= 2 ? `cycle-${year}` : cycle.batches[0].key;
     handleBatchChange(key);
   };
 
@@ -772,40 +774,14 @@ const App = () => {
     [dashboardBranchFilter, dashboardBranchSummaries, isAggregateOnly, stats.branch_summary]
   );
 
+  // One short line about where the numbers come from. Longer methodology stays in the metric
+  // tooltips rather than as standing page copy.
   const dataProvenance = useMemo(() => {
-    if (isOfficial2026) {
-      return {
-        label: 'Official plus tracker',
-        source: 'College-published 2026 figures are shown separately from tracker records.',
-        coverage: 'Official campus metrics, student/company tracker records, and imported offer details are not merged into one percentage.',
-      };
-    }
-    if (isOfficial2025) {
-      return {
-        label: 'Official statistics',
-        source: 'Placement percentages come from official 2025 figures.',
-        coverage: 'Uploaded student and company records remain browsable but are not used to infer cohort placement rates.',
-      };
-    }
-    if (isAggregateOnly) {
-      return {
-        label: 'Aggregate archive',
-        source: 'Historical M.Tech CSE company-level aggregate.',
-        coverage: 'No student names, placement rates, or compensation fields are inferred from this source.',
-      };
-    }
-    if (isPlacementRecordsOnly) {
-      return {
-        label: 'Placed-record archive',
-        source: 'Historical student-level placement records.',
-        coverage: 'The source lists placed students only, so unplaced counts and placement percentages are intentionally withheld.',
-      };
-    }
-    return {
-      label: 'Tracker dataset',
-      source: 'Student, company, and offer records stored in Placement Atlas.',
-      coverage: 'Placement rates use eligible/sitting students as the denominator; excluded students are kept visible for transparency.',
-    };
+    if (isOfficial2026) return { label: 'Official + tracker', note: 'College-published 2026 figures sit in the Official tab and are never merged with tracker records.' };
+    if (isOfficial2025) return { label: 'Official statistics', note: 'Percentages come from official 2025 figures; uploaded records stay browsable but are not used to infer rates.' };
+    if (isAggregateOnly) return { label: 'Aggregate archive', note: 'Company-level M.Tech CSE counts only — no student, rate, or compensation data in this source.' };
+    if (isPlacementRecordsOnly) return { label: 'Placed-record archive', note: 'The source lists placed students only, so unplaced counts and placement rates are withheld.' };
+    return { label: 'Tracker dataset', note: 'Placement rates use eligible and sitting students as the denominator.' };
   }, [isAggregateOnly, isOfficial2025, isOfficial2026, isPlacementRecordsOnly]);
 
   const dashboardViews = useMemo(() => {
@@ -1372,10 +1348,9 @@ const App = () => {
         <div className="navbar">
           <div className="nav-brand-row">
             <Link to="/" className="nav-logo" onClick={closeMobileNav}>
-              <img src={`${assetBase}iiitd_logo.png`} alt="IIIT Delhi logo" />
               <span className="nav-wordmark">
-                <strong>Placement Atlas</strong>
-                <small>Placement dashboard</small>
+                <strong>IIIT Delhi</strong>
+                <small>Placement Dashboard</small>
               </span>
             </Link>
             <button
@@ -1398,22 +1373,25 @@ const App = () => {
             <Link className={location.pathname === '/students' ? 'active' : ''} to="/students" onClick={closeMobileNav}>Students</Link>
           </div>
 
-          <div className="nav-user-row">
-            <label className="nav-batch-select">
-              <span>Cycle</span>
+          <div className="nav-scope">
+            <label className="nav-scope-select">
+              <span>Year</span>
+              <select value={activeCycle.year} onChange={(event) => handleCycleChange(Number(event.target.value))}>
+                {CYCLES.map((cycle) => <option key={cycle.year} value={cycle.year}>{cycle.year}</option>)}
+              </select>
+            </label>
+            <label className="nav-scope-select">
+              <span>Batch</span>
               <select value={activeBatch.key} onChange={(event) => handleBatchChange(event.target.value)}>
-                {CYCLES.map((cycle) => (
-                  <optgroup key={cycle.year} label={`${cycle.year} cycle`}>
-                    {cycle.batches.length >= 2 && (
-                      <option value={`cycle-${cycle.year}`}>Overall</option>
-                    )}
-                    {cycle.batches.map((batch) => (
-                      <option key={batch.key} value={batch.key}>{batch.degree}{batch.academic_year ? ` · ${batch.academic_year}` : ''}</option>
-                    ))}
-                  </optgroup>
+                {activeCycle.batches.length >= 2 && <option value={`cycle-${activeCycle.year}`}>Overall</option>}
+                {activeCycle.batches.map((batch) => (
+                  <option key={batch.key} value={batch.key}>{batch.degree}{batch.academic_year ? ` · ${batch.academic_year}` : ''}</option>
                 ))}
               </select>
             </label>
+          </div>
+
+          <div className="nav-user-row">
             <div className="nav-actions">
               <ThemeToggle themeMode={themeMode} onToggle={toggleThemeMode} compact />
               <button className="secondary nav-signout" title="End viewer session" onClick={() => { closeMobileNav(); handleGoogleLogout(); }}>Sign out</button>
@@ -1444,26 +1422,6 @@ const App = () => {
           path="/"
           element={(
             <main className="container dashboard-page">
-              <div className="cycle-tabs" aria-label="Select placement cycle" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
-                {CYCLES.map((cycle) => (
-                  <button key={cycle.year} type="button" className={activeCycle.year === cycle.year ? 'batch-tab active' : 'batch-tab'} aria-pressed={activeCycle.year === cycle.year} onClick={() => handleCycleChange(cycle.year)}>
-                    <strong>{cycle.year}</strong>
-                  </button>
-                ))}
-              </div>
-              <div className="batch-tabs" aria-label={`Views in the ${activeCycle.year} cycle`}>
-                {activeCycle.batches.length >= 2 && (
-                  <button type="button" className={activeBatch.key === `cycle-${activeCycle.year}` ? 'batch-tab active' : 'batch-tab'} aria-pressed={activeBatch.key === `cycle-${activeCycle.year}`} onClick={() => handleBatchChange(`cycle-${activeCycle.year}`)}>
-                    <span>Overall</span>
-                  </button>
-                )}
-                {activeCycle.batches.map((batch) => (
-                  <button key={batch.key} type="button" className={activeBatch.key === batch.key ? 'batch-tab active' : 'batch-tab'} aria-pressed={activeBatch.key === batch.key} onClick={() => handleBatchChange(batch.key)}>
-                    <span>{batch.degree}</span>{batch.academic_year ? <strong>{batch.academic_year}</strong> : null}
-                  </button>
-                ))}
-              </div>
-
               {dashboardViews.length > 1 && (
                 <div className="dashboard-view-tabs" aria-label="Dashboard view">
                   {dashboardViews.map((view) => (
@@ -1484,21 +1442,8 @@ const App = () => {
                 <>
               <section className="editorial-hero">
                 <div className="editorial-hero-copy">
-                  <span className="eyebrow">{isOfficial2026 ? 'Tracker dataset' : 'Placement intelligence'} · {activeBatch.label}</span>
-                  <h1>{isAggregateOnly ? 'A historical view of M.Tech CSE hiring.' : isOfficial2025 ? 'The official picture for the graduating class of 2025.' : isPlacementRecordsOnly ? 'Recorded outcomes from an earlier placement season.' : 'The shape of a cohort, beyond a spreadsheet.'}</h1>
-                  <p>
-                    {isAggregateOnly
-                      ? `Company-level roles and reported offer counts for academic year ${activeBatch.academic_year}. Student-level and compensation data were not included in the source.`
-                      : isOfficial2025
-                        ? `Official institute-level placement statistics for the batch graduating in 2025. Uploaded student records remain available in the directories but are not used to infer placement percentages.`
-                      : isPlacementRecordsOnly
-                        ? `Student-level placement records for students passing out in ${activeBatch.graduation_year}. The source lists placed students only, so a cohort placement percentage is not shown.`
-                        : `An evidence-led view of opportunity, outcomes, and compensation for students passing out in ${activeBatch.graduation_year}.`}
-                  </p>
-                  <div className="hero-actions">
-                    <Link className="primary-link" to="/companies">Explore companies</Link>
-                    {!isAggregateOnly && <Link className="text-link" to="/students">Browse student outcomes <span aria-hidden="true">→</span></Link>}
-                  </div>
+                  <h1>{isOverallScope ? `${activeBatch.graduation_year} placements` : `${activeBatch.degree} ${activeBatch.graduation_year}`}</h1>
+                  <p className="hero-provenance"><span className="badge">{dataProvenance.label}</span>{dataProvenance.note}</p>
                   {error && <p className="hero-error">{error}</p>}
                   {dataUpdatedAt && <p className="data-updated-note" title={`Data as of ${formatDate(dataUpdatedAt)}`}>Updated {formatRelative(dataUpdatedAt)}</p>}
                 </div>
@@ -1543,16 +1488,6 @@ const App = () => {
                 </div>
               </section>
 
-              <section className="data-status-band" aria-label="Data status">
-                <div>
-                  <span className="eyebrow">Data status</span>
-                  <h2>{dataProvenance.label}</h2>
-                </div>
-                <p>{dataProvenance.source}</p>
-                <p>{dataProvenance.coverage}</p>
-                <p>{dataUpdatedAt ? `Loaded ${formatRelative(dataUpdatedAt)}.` : 'Latest load time is not available yet.'}</p>
-              </section>
-
               <section className="metric-ledger overview-metric-ledger">
                 {isAggregateOnly ? (
                   <>
@@ -1584,30 +1519,14 @@ const App = () => {
                 )}
               </section>
 
-              {dashboardViews.length > 1 && (
-                <section className="dashboard-jump-grid" aria-label="Dashboard shortcuts">
-                  {dashboardViews.filter((view) => view.key !== 'overview').map((view) => (
-                    <button key={view.key} type="button" onClick={() => setDashboardView(view.key)}>
-                      <span className="eyebrow">{view.label}</span>
-                      <strong>
-                        {view.key === 'official' ? 'College-published numbers'
-                          : view.key === 'tracker' ? (isOfficial2025 ? 'Record-level references' : 'Tracker-derived view')
-                          : view.key === 'programs' ? 'Branch and program detail'
-                          : view.key === 'compensation' ? 'Compensation distribution'
-                          : 'Latest company activity'}
-                      </strong>
-                    </button>
-                  ))}
-                </section>
-              )}
                 </>
               )}
 
               {isAggregateOnly && dashboardView === 'overview' && (
                 <section className="historical-overview">
                   <div className="section-intro">
-                    <div><span className="eyebrow">Aggregate source</span><h2>Offer volume by recruiter.</h2></div>
-                    <p>This archive covers M.Tech CSE only. Counts are reported offers, not unique students, and companies with zero offers are retained in the source total.</p>
+                    <h2>Offer volume by recruiter</h2>
+                    <p>Reported offers, not unique students. Zero-offer companies stay in the source total.</p>
                   </div>
                   <div className="historical-summary-grid">
                     <MetricTile label="Reported offers" value={stats.total_offers || 0} note={`Academic year ${activeBatch.academic_year}`} />
@@ -1615,7 +1534,7 @@ const App = () => {
                     <MetricTile label="Recruiters listed" value={stats.total_companies_listed || 0} note="Includes zero-offer rows" />
                   </div>
                   <article className="insight-panel historical-ranking">
-                    <div className="panel-heading"><div><span className="eyebrow">Leading recruiters</span><h2>Highest reported offer counts</h2></div></div>
+                    <div className="panel-heading"><h2>Leading recruiters</h2></div>
                     <HorizontalBars items={companyVisuals.topOffers} />
                   </article>
                 </section>
@@ -1626,11 +1545,8 @@ const App = () => {
               {isOfficial2025 && dashboardView === 'official' && (
                 <section className="official-placement-dashboard">
                   <aside className="official-data-note">
-                    <div>
-                      <span className="eyebrow">Official 2025 statistics</span>
-                      <h2>Placement percentage cannot be inferred from uploaded offer lists.</h2>
-                    </div>
-                    <p>The student files contain placement outcomes but not the complete eligible graduating cohort. Therefore, this dashboard uses only the officially provided 2025 figures for percentages and campus totals. Student and company directories are retained as record-level references.</p>
+                    <span className="eyebrow">Official 2025 statistics</span>
+                    <p>The uploaded files list placement outcomes, not the full eligible cohort, so every percentage and campus total below is the officially published 2025 figure.</p>
                   </aside>
 
                   <section className="metric-ledger official-metric-ledger">
@@ -1642,7 +1558,7 @@ const App = () => {
 
                   <section className="insight-grid official-insight-grid">
                     <article className="insight-panel outcome-panel">
-                      <div className="panel-heading"><div><span className="eyebrow">Offer composition</span><h2>Full-time and internship outcomes</h2></div><span className="panel-number">{OFFICIAL_2025.total_offers}</span></div>
+                      <div className="panel-heading"><h2>Offer composition</h2><span className="panel-number">{OFFICIAL_2025.total_offers}</span></div>
                       <SegmentedBar label="Official offers" items={[
                         { label: 'Full time', value: OFFICIAL_2025.full_time_offers, tone: 'accent' },
                         { label: 'Internship', value: OFFICIAL_2025.internship_offers, tone: 'blue' },
@@ -1655,7 +1571,7 @@ const App = () => {
                     </article>
 
                     <article className="insight-panel">
-                      <div className="panel-heading"><div><span className="eyebrow">Full-time quality</span><h2>Official offer categories</h2></div></div>
+                      <div className="panel-heading"><h2>Official offer categories</h2></div>
                       <SegmentedBar label="559 full-time offers" items={OFFICIAL_2025.categories.map((category, index) => ({
                         label: category.label,
                         value: category.value,
@@ -1669,8 +1585,8 @@ const App = () => {
 
                   <section className="dashboard-section branch-section official-program-rates">
                     <div className="section-intro">
-                      <div><span className="eyebrow">Official program percentages</span><h2>{activeBatch.degree} placement outcomes</h2></div>
-                      <p>These percentages are official figures for the batch graduating in 2025, not calculations from the uploaded student records.</p>
+                      <h2>{activeBatch.degree} placement outcomes</h2>
+                      <p>Official 2025 figures, not calculations from uploaded records.</p>
                     </div>
                     <div className="branch-comparison-list">
                       {official2025Programs.map((program) => (
@@ -1687,11 +1603,8 @@ const App = () => {
               {isOfficial2026 && dashboardView === 'official' && (
                 <section className="official-placement-dashboard official-2026-dashboard">
                   <aside className="official-data-note">
-                    <div>
-                      <span className="eyebrow">College-published statistics · 2026</span>
-                      <h2>Official institute figures, shown separately from this tracker.</h2>
-                    </div>
-                    <p>These campus-wide figures were officially published for the batch graduating in 2026. They are not calculated from our uploaded student and company records, so differences may reflect publication timing, coverage, or institute methodology.</p>
+                    <span className="eyebrow">College-published statistics · 2026</span>
+                    <p>Campus-wide figures published by the institute. They are not calculated from tracker records, so differences may reflect publication timing, coverage, or methodology.</p>
                   </aside>
 
                   <section className="metric-ledger official-metric-ledger">
@@ -1703,7 +1616,7 @@ const App = () => {
 
                   <section className="insight-grid official-insight-grid">
                     <article className="insight-panel outcome-panel">
-                      <div className="panel-heading"><div><span className="eyebrow">Official offer composition</span><h2>Full-time and summer internship offers</h2></div><span className="panel-number">{OFFICIAL_2026.total_offers}</span></div>
+                      <div className="panel-heading"><h2>Official offer composition</h2><span className="panel-number">{OFFICIAL_2026.total_offers}</span></div>
                       <SegmentedBar label="College-published offers" items={[
                         { label: 'Full time', value: OFFICIAL_2026.full_time_offers, tone: 'accent' },
                         { label: 'Summer internship', value: OFFICIAL_2026.internship_offers, tone: 'blue' },
@@ -1717,7 +1630,7 @@ const App = () => {
                     </article>
 
                     <article className="insight-panel">
-                      <div className="panel-heading"><div><span className="eyebrow">Official full-time quality</span><h2>Published offer categories</h2></div></div>
+                      <div className="panel-heading"><h2>Published offer categories</h2></div>
                       <SegmentedBar label={`${OFFICIAL_2026.full_time_offers} full-time offers`} items={OFFICIAL_2026.categories.map((category, index) => ({
                         label: category.label,
                         value: category.value,
@@ -1732,8 +1645,8 @@ const App = () => {
 
                   <section className="dashboard-section branch-section official-program-rates">
                     <div className="section-intro">
-                      <div><span className="eyebrow">Official program percentages</span><h2>{activeBatch.degree} placement outcomes</h2></div>
-                      <p>College-published percentages for the batch graduating in 2026. The tracker-derived program comparison remains available below.</p>
+                      <h2>{activeBatch.degree} placement outcomes</h2>
+                      <p>College-published percentages for the 2026 batch.</p>
                     </div>
                     <div className="branch-comparison-list">
                       {official2026Programs.map((program) => (
@@ -1751,12 +1664,12 @@ const App = () => {
               {isOfficial2025 && dashboardView === 'tracker' && (
                 <section className="dashboard-section record-reference-section">
                   <div className="section-intro">
-                    <div><span className="eyebrow">Record-level references</span><h2>Uploaded records remain browsable, but not rate-derived.</h2></div>
-                    <p>The 2025 uploaded student and company rows are retained for lookup. Placement percentages on this dashboard come only from official statistics.</p>
+                    <h2>Record-level references</h2>
+                    <p>2025 rows are kept for lookup only; percentages come from official statistics.</p>
                   </div>
                   <div className="dashboard-jump-grid">
-                    <Link to="/companies"><span className="eyebrow">Companies</span><strong>Browse recorded recruiters</strong></Link>
-                    <Link to="/students"><span className="eyebrow">Students</span><strong>Browse uploaded outcomes</strong></Link>
+                    <Link to="/companies"><strong>Companies</strong><span>Recorded recruiters</span></Link>
+                    <Link to="/students"><strong>Students</strong><span>Uploaded outcomes</span></Link>
                   </div>
                 </section>
               )}
@@ -1768,10 +1681,7 @@ const App = () => {
                 </aside>
               )}
               {!isOfficial2025 && (dashboardView === 'tracker' || dashboardView === 'programs' || dashboardView === 'compensation') && <section className="dashboard-control-row">
-                <div>
-                  <span className="eyebrow">Current lens</span>
-                  <h2>{dashboardBranchFilter === 'ALL' ? 'All programs' : DASHBOARD_BRANCH_LABELS[dashboardBranchFilter]}</h2>
-                </div>
+                <span className="eyebrow">Branch</span>
                 <div className="filter-chip-row">
                   {dashboardBranchFilters.map((branchGroup) => (
                     <button key={branchGroup} type="button" className={dashboardBranchFilter === branchGroup ? 'filter-chip active' : 'filter-chip'} aria-pressed={dashboardBranchFilter === branchGroup} onClick={() => setDashboardBranchFilter(branchGroup)}>
@@ -1793,7 +1703,7 @@ const App = () => {
               {!isOfficial2025 && dashboardView === 'compensation' && (
                 <section className="dashboard-section compensation-focus-section">
                   <article className="insight-panel compensation-panel">
-                    <div className="panel-heading"><div><span className="eyebrow">Compensation</span><h2>CTC distribution</h2></div><small>Offer count by band</small></div>
+                    <div className="panel-heading"><h2>CTC distribution</h2><small>Offers by band</small></div>
                     <HorizontalBars items={dashboardVisuals.compensationBands} />
                   </article>
                 </section>
@@ -1802,7 +1712,7 @@ const App = () => {
               {!isOfficial2025 && dashboardView === 'tracker' && <section className="insight-grid tracker-insight-grid">
                 <article className="insight-panel outcome-panel">
                   <div className="panel-heading">
-                    <div><span className="eyebrow">Outcome composition</span><h2>{isPlacementRecordsOnly ? 'Recorded placed students' : 'Where the cohort stands'}</h2></div>
+                    <h2>{isPlacementRecordsOnly ? 'Recorded placed students' : 'Cohort status'}</h2>
                     <span className="panel-number">{activeOverviewSummary.total_students || 0}</span>
                   </div>
                   <SegmentedBar label={isPlacementRecordsOnly ? 'Source records' : 'Student status'} items={isPlacementRecordsOnly ? [
@@ -1824,7 +1734,7 @@ const App = () => {
                 </article>
 
                 <article className="insight-panel">
-                  <div className="panel-heading"><div><span className="eyebrow">Offer quality</span><h2>Category mix</h2></div></div>
+                  <div className="panel-heading"><h2>Category mix</h2></div>
                   <SegmentedBar label="Recorded offers" items={[
                     { label: 'A+', value: activeOverviewSummary.total_Aplus_offers || 0, tone: 'accent' },
                     { label: 'A', value: activeOverviewSummary.total_A_offers || 0, tone: 'blue' },
@@ -1841,8 +1751,8 @@ const App = () => {
 
               {!isPlacementRecordsOnly && dashboardView === 'programs' && <section className="dashboard-section branch-section">
                 <div className="section-intro">
-                  <div><span className="eyebrow">Program comparison</span><h2>Every discipline has its own story.</h2></div>
-                  <p>Placement rates use eligible and sitting students as the denominator. Offer counts may exceed placed students where multiple offers are recorded.</p>
+                  <h2>Program comparison</h2>
+                  <p>Offer counts can exceed placed students where multiple offers are recorded.</p>
                 </div>
                 <div className="branch-comparison-list">
                   {dashboardVisuals.branchComparison.map((item) => (
@@ -1857,7 +1767,7 @@ const App = () => {
 
               {!isOfficial2025 && dashboardView === 'programs' && <section className="dashboard-section program-section">
                 <div className="section-intro">
-                  <div><span className="eyebrow">Program notes</span><h2>A closer reading.</h2></div>
+                  <h2>Program detail</h2>
                   <span className="section-count">{filteredProgramSummaries.length} programs</span>
                 </div>
                 <div className="program-editorial-grid">
@@ -1878,7 +1788,7 @@ const App = () => {
               </section>}
 
               {!isOfficial2025 && dashboardView === 'recent' && <section className="dashboard-section recent-section">
-                <div className="section-intro"><div><span className="eyebrow">Recent records</span><h2>Latest offer dates.</h2></div><Link className="text-link" to="/companies">All companies →</Link></div>
+                <div className="section-intro"><h2>Latest offer dates</h2><Link className="text-link" to="/companies">All companies →</Link></div>
                 <div className="recent-company-list">
                   {dashboardVisuals.recentCompanies.map((company, index) => (
                     <button key={company.id} type="button" onClick={() => { openCompanyDetail(company); navigate(`/companies?batch=${activeBatch.key}&company=${company.id}`); }}>
@@ -1895,7 +1805,7 @@ const App = () => {
 
               <aside className="disclaimer-card">
                 <span className="eyebrow">Data note</span>
-                <p>This is an unofficial side project and is not verified by the Placement Office. Report genuine discrepancies to yash25091@iiitd.ac.in.</p>
+                <p>Unofficial side project, not verified by the Placement Office. Report discrepancies to yash25091@iiitd.ac.in.</p>
                 <Link to="/admin">Administrative access</Link>
               </aside>
             </main>
@@ -1909,10 +1819,9 @@ const App = () => {
               {error && <p className="page-alert" role="alert">{error}</p>}
               <section className="directory-hero">
                 <div className="directory-hero-copy">
-                  <span className="eyebrow">Company index · {activeBatch.label}</span>
-                  <h1>Recruiters, roles, and the opportunities they created.</h1>
-                  <p>{isAggregateOnly ? 'Explore company roles and reported M.Tech CSE offer counts from the historical aggregate.' : 'Explore compensation, eligibility, offer type, and the actual branch footprint of every recorded company.'}</p>
-                  {!isAdmin && !isAggregateOnly && <p className="directory-scope-note">Showing companies with recorded hiring outcomes for this cohort. A company that visited but has no recorded offers yet may not appear here.</p>}
+                  <h1>Companies</h1>
+                  <p>{activeBatch.label}</p>
+                  {!isAdmin && !isAggregateOnly && <p className="directory-scope-note">Only companies with recorded hiring outcomes for this cohort are listed.</p>}
                 </div>
                 <div className="directory-hero-stats">
                   <MetricTile label="Visible companies" value={companyOverview.total} note={companyOverview.activeTypes} />
@@ -1922,11 +1831,6 @@ const App = () => {
               </section>
 
               <MobileDisclosure summary="Recruiter insights" className="insight-disclosure" contentClassName="directory-insights">
-                <div className="directory-insight-copy">
-                  <span className="eyebrow">Market composition</span>
-                  <h2>A quick read of the recruiter set.</h2>
-                  <p>Filters update the visual summaries and opportunity cards together.</p>
-                </div>
                 {isAggregateOnly ? (
                   <div style={{ gridColumn: 'span 2' }}><HorizontalBars items={companyVisuals.topOffers.slice(0, 5)} /></div>
                 ) : (
@@ -1992,7 +1896,7 @@ const App = () => {
               )}
 
               <div className="directory-result-heading">
-                <div><span className="eyebrow">Opportunity catalogue</span><h2>{filteredCompanies.length} companies</h2>{dataUpdatedAt && <span className="data-updated-note" title={`Data as of ${formatDate(dataUpdatedAt)}`}>Updated {formatRelative(dataUpdatedAt)}</span>}</div>
+                <div><h2>{filteredCompanies.length} companies</h2>{dataUpdatedAt && <span className="data-updated-note" title={`Data as of ${formatDate(dataUpdatedAt)}`}>Updated {formatRelative(dataUpdatedAt)}</span>}</div>
                 <div className="result-actions">
                   <div className="view-toggle" aria-label="Company view mode">
                     <button type="button" className={companyView === 'cards' ? 'active' : ''} aria-pressed={companyView === 'cards'} onClick={() => setCompanyView('cards')}>Cards</button>
@@ -2043,50 +1947,41 @@ const App = () => {
                   const hiring = companyHiringStats[company.id] || { total: 0, reported: 0, CSE: 0, ECE: 0, CB: 0 };
                   const showReportedAggregate = !isAggregateOnly && hiring.reported > 0;
                   const categoryClass = String(company.category || 'other').toLowerCase().replace('+', 'plus');
+                  const reportedOnly = isAggregateOnly || (!hiring.total && hiring.reported);
                   return (
                     <article key={company.id} className={`company-card company-card-${categoryClass}`}>
                       <button type="button" className="company-card-main" onClick={() => openCompanyDetail(company)}>
                         <div className={`company-monogram company-monogram-${categoryClass}`}>{initialsFor(company.name)}</div>
                         <div className="company-card-copy">
-                          <div className="company-card-kicker">
-                            {isAggregateOnly ? (
-                              <><span>M.Tech CSE</span><span>{company.reported_offer_count || 0} reported offers</span></>
-                            ) : (
-                              <>
-                                <span>{company.type || 'Opportunity'}</span>
-                                <span className={`category-badge category-${categoryClass}`}>{company.category || '—'}</span>
-                                {showReportedAggregate && <span>{hiring.reported} reported CSE offers</span>}
-                              </>
-                            )}
-                          </div>
                           <h3>{company.name}</h3>
-                          <p>{company.role || 'Role details not recorded'}</p>
+                          <p>{company.role || (isAggregateOnly ? 'M.Tech CSE' : 'Role not recorded')}</p>
                         </div>
-                        <span className="company-card-arrow" aria-hidden="true">↗</span>
+                        <span className="company-card-tags">
+                          {!isAggregateOnly && <span className={`category-badge category-${categoryClass}`}>{company.category || '—'}</span>}
+                          <span className="company-card-type">{isAggregateOnly ? activeBatch.academic_year : company.type || 'Opportunity'}</span>
+                        </span>
                       </button>
-                      <div className="company-card-facts">
+                      <dl className="company-card-facts">
                         {isAggregateOnly ? (
                           <>
-                            <div><span>Reported offers</span><strong>{company.reported_offer_count || 0}</strong></div>
-                            <div><span>Scope</span><strong>M.Tech CSE</strong></div>
-                            <div><span>Academic year</span><strong>{activeBatch.academic_year}</strong></div>
+                            <div><dt>Reported offers</dt><dd>{company.reported_offer_count || 0}</dd></div>
+                            <div><dt>Scope</dt><dd>M.Tech CSE</dd></div>
                           </>
                         ) : (
                           <>
-                            <div><span>CTC</span><strong>{formatInr(company.ctc, 'p.a.')}</strong></div>
-                            <div><span>Stipend</span><strong>{formatInr(company.stipend, 'p.m.')}</strong></div>
-                            <div><span>{showReportedAggregate ? 'Reported CSE offers' : 'Eligibility'}</span><strong>{showReportedAggregate ? hiring.reported : company.eligible_cgpa ? `${company.eligible_cgpa} CGPA` : 'Not listed'}</strong></div>
+                            <div><dt>CTC</dt><dd>{formatInr(company.ctc, 'p.a.')}</dd></div>
+                            <div><dt>Stipend</dt><dd>{formatInr(company.stipend, 'p.m.')}</dd></div>
+                            <div><dt>Eligibility</dt><dd>{company.eligible_cgpa ? `${company.eligible_cgpa} CGPA` : 'Not listed'}</dd></div>
+                            <div><dt>{reportedOnly ? 'Reported offers' : 'Hires'}</dt><dd>{reportedOnly ? hiring.reported : hiring.total}</dd></div>
                           </>
                         )}
-                      </div>
-                      <div className="company-hiring-footprint">
-                        <div className="footprint-head"><span>{isAggregateOnly || (!hiring.total && hiring.reported) ? 'Reported aggregate' : 'Hiring footprint'}</span><strong>{isAggregateOnly || (!hiring.total && hiring.reported) ? hiring.reported : hiring.total} {isAggregateOnly || (!hiring.total && hiring.reported) ? 'offers' : 'hires'}</strong></div>
-                        <div className="footprint-bars">
-                          {(isAggregateOnly || (!hiring.total && hiring.reported) ? ['CSE'] : ['CSE', 'ECE', 'CB']).map((branch) => (
-                            <div key={branch}><span>{branch}</span><i><b style={{ width: `${isAggregateOnly || (!hiring.total && hiring.reported) ? 100 : hiring.total ? (hiring[branch] / hiring.total) * 100 : 0}%` }} /></i><strong>{isAggregateOnly || (!hiring.total && hiring.reported) ? hiring.reported : hiring[branch]}</strong></div>
-                          ))}
+                      </dl>
+                      {!isAggregateOnly && (hiring.total > 0 || showReportedAggregate) && (
+                        <div className="company-card-branches">
+                          {showReportedAggregate && <span>CSE {hiring.reported} reported</span>}
+                          {['CSE', 'ECE', 'CB'].filter((branch) => hiring[branch] > 0).map((branch) => <span key={branch}>{branch} {hiring[branch]}</span>)}
                         </div>
-                      </div>
+                      )}
                       {isAdmin && <div className="card-admin-actions"><button className="secondary" onClick={() => { setEditCompany(company); setShowCompanyModal(true); }}>Edit</button><button className="danger-button" onClick={() => deleteCompanyAction(company.id)}>Delete</button></div>}
                     </article>
                   );
@@ -2293,9 +2188,8 @@ const App = () => {
               <main className="container section-page students-page">
                 <section className="directory-hero">
                   <div className="directory-hero-copy">
-                    <span className="eyebrow">Aggregate archive · {activeBatch.label}</span>
-                    <h1>Student-level records were not included.</h1>
-                    <p>This historical source contains M.Tech CSE company names, roles, and aggregate offer counts only. No student names, roll numbers, placement rates, or compensation figures are inferred.</p>
+                    <h1>No student records</h1>
+                    <p>{activeBatch.label} is a company-level aggregate: names, rolls, rates, and compensation were not in the source.</p>
                     <div className="hero-actions"><Link className="primary-link" to="/companies">View reported offers</Link><Link className="text-link" to="/">Return to overview</Link></div>
                   </div>
                 </section>
@@ -2305,9 +2199,8 @@ const App = () => {
               {error && <p className="page-alert" role="alert">{error}</p>}
               <section className="directory-hero student-directory-hero">
                 <div className="directory-hero-copy">
-                  <span className="eyebrow">Student outcomes · {activeBatch.label}</span>
-                  <h1>A living directory of progress, offers, and possibility.</h1>
-                  <p>Read the cohort by status, discipline, and offer journey without reducing people to spreadsheet rows.</p>
+                  <h1>Students</h1>
+                  <p>{activeBatch.label} · {studentOverview.total} records across {studentOverview.programs} programs</p>
                 </div>
                 <div className="student-hero-outcome">
                   <DonutChart value={studentOverview.placed} total={studentOverview.eligible} label="Visible placement rate" detail={`${studentOverview.placed} placed`} />
@@ -2315,7 +2208,6 @@ const App = () => {
               </section>
 
               <MobileDisclosure summary="Selection overview" className="insight-disclosure" contentClassName="student-status-overview">
-                <div className="student-status-copy"><span className="eyebrow">Current selection</span><h2>{studentOverview.total} students across {studentOverview.programs} programs.</h2><p>{studentOverview.internships} students have an internship or combined track in the visible result set.</p></div>
                 <SegmentedBar label="Placement status" items={studentVisuals.statuses} />
                 <HorizontalBars items={studentVisuals.programs} />
               </MobileDisclosure>
@@ -2408,7 +2300,7 @@ const App = () => {
               )}
 
               <div className="directory-result-heading student-result-heading">
-                <div><span className="eyebrow">Student directory</span><h2>{filteredStudents.length} visible records</h2>{dataUpdatedAt && <span className="data-updated-note" title={`Data as of ${formatDate(dataUpdatedAt)}`}>Updated {formatRelative(dataUpdatedAt)}</span>}</div>
+                <div><h2>{filteredStudents.length} students</h2>{dataUpdatedAt && <span className="data-updated-note" title={`Data as of ${formatDate(dataUpdatedAt)}`}>Updated {formatRelative(dataUpdatedAt)}</span>}</div>
                 <div className="result-actions">
                   <div className="view-toggle" aria-label="Student view mode">
                     <button type="button" className={studentView === 'cards' ? 'active' : ''} aria-pressed={studentView === 'cards'} onClick={() => setStudentView('cards')}>List</button>
@@ -2462,6 +2354,7 @@ const App = () => {
                   const offers = getStudentOffers(student);
                   const highestCtc = Math.max(...offers.map((offer) => Number(offer.ctc ?? offer.company_ctc) || 0), 0);
                   const companyNames = offers.map((offer) => offer.company_name).filter(Boolean);
+                  const latestOffer = offers.map((offer) => offer.offer_date || offer.company_offer_date).filter(Boolean).sort((a, b) => new Date(b) - new Date(a))[0];
                   const statusClass = String(student.placement_status || 'unknown').toLowerCase().replace(/\s+/g, '-');
                   return (
                     <article key={student.id} className={`student-profile-row student-profile-${statusClass}`}>
@@ -2472,10 +2365,10 @@ const App = () => {
                       </button>
                       <div className="student-offer-summary">
                         {companyNames.length ? (
-                          <><span className="offer-company-stack">{companyNames.slice(0, 2).join(' · ')}{companyNames.length > 2 ? ` +${companyNames.length - 2}` : ''}</span><small>{offers.map((offer) => offer.offer_type).filter(Boolean).join(' · ')}</small></>
+                          <><span className="offer-company-stack">{companyNames.slice(0, 2).join(' · ')}{companyNames.length > 2 ? ` +${companyNames.length - 2}` : ''}</span><small>{[offers.map((offer) => offer.offer_type).filter(Boolean).join(' · '), latestOffer ? formatDate(latestOffer) : null].filter(Boolean).join(' · ')}</small></>
                         ) : <span className="no-offer-copy">No recorded offer yet</span>}
                       </div>
-                      <div className="student-compensation"><span>Best recorded CTC</span><strong>{formatInr(highestCtc || null, 'p.a.')}</strong></div>
+                      <div className="student-compensation"><span>Best CTC</span><strong>{formatInr(highestCtc || null, 'p.a.')}</strong></div>
                       <button type="button" className="row-open-button" aria-label={`Open ${student.name}`} onClick={() => openStudentDetail(student)}>→</button>
                       {isAdmin && <div className="row-admin-actions"><button className="secondary" onClick={() => { setEditStudent(student); setShowStudentModal(true); }}>Edit</button><button className="danger-button" onClick={() => deleteStudentAction(student.id)}>Delete</button></div>}
                     </article>

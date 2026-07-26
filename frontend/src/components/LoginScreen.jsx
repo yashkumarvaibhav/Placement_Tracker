@@ -9,9 +9,8 @@ const LoginScreen = ({ assetBase, onSuccess, onError, onViewerLogin, error, pend
   return (
     <main className="landing-page">
     <nav className="landing-nav">
-      <a className="landing-brand" href="#top" aria-label="Placement Atlas home">
-        <img src={`${assetBase}iiitd_logo.png`} alt="IIIT Delhi" />
-        <span><strong>Placement Atlas</strong><small>Community dashboard</small></span>
+      <a className="landing-brand" href="#top" aria-label="IIIT Delhi Placement Dashboard home">
+        <span><strong>IIIT Delhi</strong><small>Placement Dashboard</small></span>
       </a>
       <div className="landing-nav-actions">
         <span className="unofficial-pill">Unofficial side project</span>
@@ -21,12 +20,8 @@ const LoginScreen = ({ assetBase, onSuccess, onError, onViewerLogin, error, pend
 
     <section id="top" className="landing-hero">
       <div className="landing-hero-copy">
-        <span className="eyebrow">Placement information, thoughtfully organised</span>
-        <h1>A clearer view of the IIIT Delhi placement journey.</h1>
-        <p>
-          Placement Atlas brings cohort outcomes, recruiter records, compensation context,
-          and student offer journeys into one searchable, student-built reference.
-        </p>
+        <h1>IIIT Delhi Placement Dashboard</h1>
+        <p>Cohort outcomes, recruiter records, and compensation context in one searchable, student-built reference.</p>
         <div className="landing-principles" aria-label="Access and privacy summary">
           <span><i>01</i> Restricted to IIIT Delhi students</span>
           <span><i>02</i> Verified with Google or viewer credentials</span>
@@ -99,20 +94,16 @@ const LoginScreen = ({ assetBase, onSuccess, onError, onViewerLogin, error, pend
     </section>
 
     <section className="landing-about" aria-labelledby="about-heading">
-      <div className="landing-section-heading">
-        <span className="eyebrow">What is inside</span>
-        <h2 id="about-heading">From scattered records to useful context.</h2>
-        <p>The underlying information remains private until your institute account is verified.</p>
-      </div>
+      <h2 id="about-heading">What is inside</h2>
       <div className="landing-feature-grid">
-        <article><span>01</span><h3>Cohort overview</h3><p>Understand placement progress and offer composition across batches and programs.</p></article>
-        <article><span>02</span><h3>Company directory</h3><p>Explore recruiters, roles, eligibility, compensation, and recorded hiring footprints.</p></article>
-        <article><span>03</span><h3>Student outcomes</h3><p>Review verified internal records through searchable, structured offer journeys.</p></article>
+        <article><h3>Cohort overview</h3><p>Placement progress and offer composition across batches and programs.</p></article>
+        <article><h3>Company directory</h3><p>Recruiters, roles, eligibility, compensation, and recorded hiring footprints.</p></article>
+        <article><h3>Student outcomes</h3><p>Searchable internal records with structured offer journeys.</p></article>
       </div>
     </section>
 
     <footer className="landing-footer">
-      <p><strong>Important:</strong> Placement Atlas is an unofficial student side project. It is not operated by, endorsed by, or a substitute for the IIIT Delhi Placement Office.</p>
+      <p><strong>Important:</strong> this is an unofficial student side project. It is not operated by, endorsed by, or a substitute for the IIIT Delhi Placement Office.</p>
       <span>Use the information responsibly and report genuine discrepancies to yash25091@iiitd.ac.in.</span>
     </footer>
     </main>
