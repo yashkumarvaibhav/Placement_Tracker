@@ -174,6 +174,9 @@ header:focus-within { transform: translateY(0) !important; }
 .nav-scope-select { display: flex; align-items: center; gap: 6px; color: var(--text-faint); font-size: .64rem; letter-spacing: .1em; text-transform: uppercase; }
 .nav-scope-select select { width: auto; min-width: 96px; padding: 7px 28px 7px 10px; font-size: .82rem; font-weight: 700; letter-spacing: 0; text-transform: none; }
 .nav-actions button, .nav-admin-link { white-space: nowrap; padding: 8px 11px; font-size: .78rem; }
+.admin-view-switch { border-color: var(--border-strong) !important; color: var(--accent-hover) !important; }
+.admin-view-switch.is-admin { background: var(--accent-soft); }
+.admin-view-switch:hover { background: var(--accent-soft) !important; }
 .theme-toggle span:last-child { display: none; }
 .theme-toggle-icon { font-size: 1rem; }
 .nav-toggle { display: none; width: 44px; height: 44px; padding: 0; background: var(--bg-raised); border-color: var(--border); }

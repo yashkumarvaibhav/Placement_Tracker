@@ -55,6 +55,7 @@ const PlacementCalendarAdmin = lazy(() => import('./PlacementCalendarAdmin'));
 const assetBase = import.meta.env.BASE_URL || '/';
 const VIEWER_TOKEN_STORAGE_KEY = 'viewerToken';
 const RATINGS_INTRO_VERSION = 'skill-ratings-v1';
+const ADMIN_VIEW_STORAGE_KEY = 'placementAdminView';
 const COMPANY_SORT_FIELDS = new Set(['name', 'ctc', 'stipend', 'totalHired', 'offer_date']);
 const STUDENT_SORT_FIELDS = new Set(['roll_number', 'name', 'ctc', 'stipend', 'offer_date']);
 const VIEW_MODES = new Set(['cards', 'table']);
@@ -185,6 +186,9 @@ const App = () => {
   const initialDashboardView = useMemo(() => readDashboardView(routeSearchParams), []);
   const [viewerToken, setViewerToken] = useState(readStoredViewerToken);
   const [token, setToken] = useState('');
+  const [adminViewEnabled, setAdminViewEnabled] = useState(
+    () => localStorage.getItem(ADMIN_VIEW_STORAGE_KEY) !== 'student'
+  );
   const [activeBatchKey, setActiveBatchKey] = useState(() => {
     const queryBatch = routeSearchParams.get('batch');
     return isKnownBatchKey(queryBatch) ? queryBatch : readInitialBatchKey();
@@ -198,7 +202,8 @@ const App = () => {
   const initialSnapshot = readBatchCache(activeBatchKey);
   const authHeaders = useAdminHeaders(token);
   const viewerHeaders = useAdminHeaders(viewerToken);
-  const isAdmin = !!token;
+  const hasAdminAccess = !!token;
+  const isAdmin = hasAdminAccess && adminViewEnabled;
   const activeBatch = useMemo(() => getBatchConfig(activeBatchKey), [activeBatchKey]);
   const isOverallScope = activeBatch.degree === 'Overall';
   const isAggregateOnly = !!activeBatch.aggregate_only;
@@ -670,6 +675,22 @@ const App = () => {
 
   const closeMobileNav = () => {
     setMobileNavOpen(false);
+  };
+
+  const toggleAdminView = () => {
+    const nextAdminView = !isAdmin;
+    setAdminViewEnabled(nextAdminView);
+    localStorage.setItem(ADMIN_VIEW_STORAGE_KEY, nextAdminView ? 'admin' : 'student');
+    closeMobileNav();
+
+    if (!nextAdminView) {
+      setShowCompanyModal(false);
+      setShowStudentModal(false);
+      setShowRatingsAnalytics(false);
+      setEditCompany(null);
+      setEditStudent(null);
+      if (isAdminRoute) navigate('/');
+    }
   };
 
   const toggleThemeMode = () => {
@@ -1537,6 +1558,16 @@ const App = () => {
           <div className="nav-user-row">
             <div className="nav-actions">
               <ThemeToggle themeMode={themeMode} onToggle={toggleThemeMode} compact />
+              {hasAdminAccess && (
+                <button
+                  type="button"
+                  className={isAdmin ? 'secondary admin-view-switch is-admin' : 'secondary admin-view-switch'}
+                  title={isAdmin ? 'Preview Placement Atlas exactly as a student sees it' : 'Return to administrative controls'}
+                  onClick={toggleAdminView}
+                >
+                  {isAdmin ? 'Switch to student view' : 'Switch to admin view'}
+                </button>
+              )}
               <button className="secondary nav-signout" title="End viewer session" onClick={() => { closeMobileNav(); handleGoogleLogout(); }}>Sign out</button>
               {isAdmin && <Link className="nav-admin-link" to="/admin/calendar" onClick={closeMobileNav}>Calendar</Link>}
               {isAdmin && <Link className="nav-admin-link" to="/admin" onClick={closeMobileNav}>Viewer Access</Link>}
