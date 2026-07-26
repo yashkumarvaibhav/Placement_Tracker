@@ -57,7 +57,15 @@ const VIEWER_TOKEN_STORAGE_KEY = 'viewerToken';
 const RATINGS_INTRO_VERSION = 'skill-ratings-v1';
 const ADMIN_VIEW_STORAGE_KEY = 'placementAdminView';
 const COMPANY_SORT_FIELDS = new Set(['name', 'ctc', 'stipend', 'totalHired', 'offer_date']);
-const STUDENT_SORT_FIELDS = new Set(['roll_number', 'name', 'ctc', 'stipend', 'offer_date']);
+const STUDENT_SKILL_SORT_FIELDS = new Set(['rating_overall', 'rating_dsa', 'rating_ml']);
+const STUDENT_SORT_FIELDS = new Set([
+  'roll_number',
+  'name',
+  'ctc',
+  'stipend',
+  'offer_date',
+  ...STUDENT_SKILL_SORT_FIELDS,
+]);
 const VIEW_MODES = new Set(['cards', 'table']);
 
 const DASHBOARD_VIEWS = new Set(['overview', 'official', 'tracker', 'programs', 'compensation', 'recent']);
@@ -1091,6 +1099,23 @@ const App = () => {
     // Sort
     const { field, asc } = studentSort;
     result.sort((a, b) => {
+      const compareRollNumbers = () => String(a.roll_number || '').localeCompare(
+        String(b.roll_number || ''),
+        undefined,
+        { numeric: true, sensitivity: 'base' }
+      );
+
+      if (STUDENT_SKILL_SORT_FIELDS.has(field)) {
+        const aHasRating = a[field] !== null && a[field] !== undefined && Number.isFinite(Number(a[field]));
+        const bHasRating = b[field] !== null && b[field] !== undefined && Number.isFinite(Number(b[field]));
+        if (aHasRating !== bHasRating) return aHasRating ? -1 : 1;
+        if (!aHasRating) return compareRollNumbers();
+
+        const scoreDifference = Number(a[field]) - Number(b[field]);
+        if (scoreDifference !== 0) return asc ? scoreDifference : -scoreDifference;
+        return compareRollNumbers();
+      }
+
       const participationRank = (student) => (
         ['Not Sitting', 'Ineligible'].includes(student.placement_status) ? 1 : 0
       );
@@ -2424,7 +2449,7 @@ const App = () => {
                   </label>
                   <label className="sort-control">Sort by
                     <select value={studentSort.field} onChange={(event) => { const field = event.target.value; setStudentSort({ field, asc: field === 'name' || field === 'roll_number' }); }}>
-                      <option value="roll_number">Roll number</option><option value="name">Name</option><option value="ctc">Highest CTC</option><option value="stipend">Highest stipend</option><option value="offer_date">Latest offer</option>
+                      <option value="roll_number">Roll number</option><option value="name">Name</option><option value="rating_overall">Overall skills</option><option value="rating_dsa">DSA skills</option><option value="rating_ml">ML skills</option><option value="ctc">Highest CTC</option><option value="stipend">Highest stipend</option><option value="offer_date">Latest offer</option>
                     </select>
                   </label>
                   {(studentSearch || studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0) && <button type="button" className="secondary clear-filters-button" onClick={() => { setStudentSearch(''); setStudentFilters(DEFAULT_STUDENT_FILTERS); }}>Clear filters</button>}
