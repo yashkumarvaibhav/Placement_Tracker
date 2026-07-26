@@ -1008,12 +1008,6 @@ const App = () => {
     const placed = filteredStudents.filter((student) => student.placement_status === 'Placed').length;
     const eligible = filteredStudents.filter(isPlacementEligibleStudent).length;
     const excluded = Math.max(filteredStudents.length - eligible, 0);
-    const internships = filteredStudents.filter((student) => {
-      if (student.offers?.length) {
-        return student.offers.some((offer) => isInternshipOfferType(offer.offer_type));
-      }
-      return isInternshipOfferType(student.offer_type);
-    }).length;
 
     return {
       total: filteredStudents.length,
@@ -1021,7 +1015,6 @@ const App = () => {
       excluded,
       placed,
       unplaced: Math.max(eligible - placed, 0),
-      internships,
       programs: new Set(filteredStudents.map((student) => student.program).filter(Boolean)).size,
     };
   }, [filteredStudents]);
