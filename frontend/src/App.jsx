@@ -32,7 +32,6 @@ import { ViewerAccessSettings } from './components/ViewerAccessSettings';
 import { BRANCH_OPTIONS, branchToken, companyRecruitsDegree, formatBranchToken } from './lib/branches';
 import {
   BRANCH_GROUP_ORDER,
-  DASHBOARD_BRANCH_LABELS,
   EMPTY_SLICE_SUMMARY,
   STUDENT_STATUS_OPTIONS,
   buildProgramSummaries,
@@ -54,8 +53,8 @@ const STUDENT_SORT_FIELDS = new Set(['roll_number', 'name', 'ctc', 'stipend', 'o
 const VIEW_MODES = new Set(['cards', 'table']);
 
 const DASHBOARD_VIEWS = new Set(['overview', 'official', 'tracker', 'programs', 'compensation', 'recent']);
-const DEFAULT_COMPANY_FILTERS = { type: '', category: '', branchGroup: '' };
-const DEFAULT_STUDENT_FILTERS = { branchGroup: '', programs: [], status: '', offerType: '' };
+const DEFAULT_COMPANY_FILTERS = { type: '', category: '' };
+const DEFAULT_STUDENT_FILTERS = { programs: [], status: '', offerType: '' };
 const LATEST_CYCLE_KEY = `cycle-${Math.max(...BATCHES.map((batch) => batch.graduation_year))}`;
 const readInitialBatchKey = () => {
   const stored = localStorage.getItem('activeBatchKey');
@@ -63,6 +62,8 @@ const readInitialBatchKey = () => {
   return stored || LATEST_CYCLE_KEY;
 };
 
+const BRANCH_GROUPS = ['CSE', 'ECE', 'CB'];
+const isKnownBranchGroup = (value) => value === 'ALL' || BRANCH_GROUPS.includes(value);
 const isKnownBatchKey = (key) => (
   BATCHES.some((batch) => batch.key === key)
   || (/^cycle-\d+$/.test(key || '') && BATCHES.some((batch) => `cycle-${batch.graduation_year}` === key))
@@ -82,7 +83,6 @@ const readCompanyQueryState = (searchParams) => {
     filters: {
       type: searchParams.get('companyType') || '',
       category: searchParams.get('companyCategory') || '',
-      branchGroup: searchParams.get('companyBranch') || '',
     },
     sort: {
       field: COMPANY_SORT_FIELDS.has(sort) ? sort : 'name',
@@ -98,7 +98,6 @@ const readStudentQueryState = (searchParams) => {
   return {
     search: searchParams.get('studentSearch') || '',
     filters: {
-      branchGroup: searchParams.get('studentBranch') || '',
       programs: splitProgramsParam(searchParams.get('studentPrograms')),
       status: searchParams.get('studentStatus') || '',
       offerType: searchParams.get('studentOfferType') || '',
@@ -182,6 +181,12 @@ const App = () => {
   const [activeBatchKey, setActiveBatchKey] = useState(() => {
     const queryBatch = routeSearchParams.get('batch');
     return isKnownBatchKey(queryBatch) ? queryBatch : readInitialBatchKey();
+  });
+  // Branch group is part of the scope (year -> batch -> group), so it is chosen once in the
+  // header and applies to the dashboard, the company index, and the student directory alike.
+  const [activeBranchGroup, setActiveBranchGroup] = useState(() => {
+    const queryGroup = routeSearchParams.get('group');
+    return isKnownBranchGroup(queryGroup) ? queryGroup : 'ALL';
   });
   const initialSnapshot = readBatchCache(activeBatchKey);
   const authHeaders = useAdminHeaders(token);
@@ -310,7 +315,6 @@ const App = () => {
   const [studentView, setStudentView] = useState(initialStudentQuery.view);
   const [selectedStudentId, setSelectedStudentId] = useState(routeSearchParams.get('student') || '');
   const [selectedStudent, setSelectedStudent] = useState(null);
-  const [dashboardBranchFilter, setDashboardBranchFilter] = useState('ALL');
   const [dashboardView, setDashboardView] = useState(initialDashboardView);
   const [mobileHeaderHidden, setMobileHeaderHidden] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -336,6 +340,10 @@ const App = () => {
     const queryBatch = searchParams.get('batch');
     if (isKnownBatchKey(queryBatch)) {
       setActiveBatchKey((current) => (current === queryBatch ? current : queryBatch));
+    }
+    const queryGroup = searchParams.get('group') || 'ALL';
+    if (isKnownBranchGroup(queryGroup)) {
+      setActiveBranchGroup((current) => (current === queryGroup ? current : queryGroup));
     }
 
     if (location.pathname === '/') {
@@ -378,7 +386,6 @@ const App = () => {
     }
 
     setError('');
-    setDashboardBranchFilter('ALL');
     setSelectedCompany(null);
     setSelectedStudent(null);
     setMobileNavOpen(false);
@@ -393,23 +400,22 @@ const App = () => {
 
     const params = new URLSearchParams(location.search);
     params.set('batch', activeBatch.key);
+    activeBranchGroup !== 'ALL' ? params.set('group', activeBranchGroup) : params.delete('group');
 
     if (location.pathname === '/') {
       canonicalDashboardView !== 'overview' ? params.set('view', canonicalDashboardView) : params.delete('view');
-      ['companySearch', 'companyType', 'companyCategory', 'companyBranch', 'companySort', 'companyDir', 'companyView', 'company', 'studentSearch', 'studentBranch', 'studentPrograms', 'studentStatus', 'studentOfferType', 'studentSort', 'studentDir', 'studentView', 'student'].forEach((key) => params.delete(key));
+      ['companySearch', 'companyType', 'companyCategory', 'companySort', 'companyDir', 'companyView', 'company', 'studentSearch', 'studentPrograms', 'studentStatus', 'studentOfferType', 'studentSort', 'studentDir', 'studentView', 'student'].forEach((key) => params.delete(key));
     } else if (location.pathname === '/companies') {
       companySearch ? params.set('companySearch', companySearch) : params.delete('companySearch');
       companyFilters.type ? params.set('companyType', companyFilters.type) : params.delete('companyType');
       companyFilters.category ? params.set('companyCategory', companyFilters.category) : params.delete('companyCategory');
-      companyFilters.branchGroup ? params.set('companyBranch', companyFilters.branchGroup) : params.delete('companyBranch');
       companySort.field !== 'name' ? params.set('companySort', companySort.field) : params.delete('companySort');
       companySort.asc === false ? params.set('companyDir', 'desc') : params.delete('companyDir');
       companyView !== 'cards' ? params.set('companyView', companyView) : params.delete('companyView');
       selectedCompanyId ? params.set('company', selectedCompanyId) : params.delete('company');
-      ['view', 'studentSearch', 'studentBranch', 'studentPrograms', 'studentStatus', 'studentOfferType', 'studentSort', 'studentDir', 'studentView', 'student'].forEach((key) => params.delete(key));
+      ['view', 'studentSearch', 'studentPrograms', 'studentStatus', 'studentOfferType', 'studentSort', 'studentDir', 'studentView', 'student'].forEach((key) => params.delete(key));
     } else if (location.pathname === '/students') {
       studentSearch ? params.set('studentSearch', studentSearch) : params.delete('studentSearch');
-      studentFilters.branchGroup ? params.set('studentBranch', studentFilters.branchGroup) : params.delete('studentBranch');
       studentFilters.programs.length ? params.set('studentPrograms', studentFilters.programs.join(',')) : params.delete('studentPrograms');
       studentFilters.status ? params.set('studentStatus', studentFilters.status) : params.delete('studentStatus');
       studentFilters.offerType ? params.set('studentOfferType', studentFilters.offerType) : params.delete('studentOfferType');
@@ -417,7 +423,7 @@ const App = () => {
       studentSort.asc === false ? params.set('studentDir', 'desc') : params.delete('studentDir');
       studentView !== 'cards' ? params.set('studentView', studentView) : params.delete('studentView');
       selectedStudentId ? params.set('student', selectedStudentId) : params.delete('student');
-      ['view', 'companySearch', 'companyType', 'companyCategory', 'companyBranch', 'companySort', 'companyDir', 'companyView', 'company'].forEach((key) => params.delete(key));
+      ['view', 'companySearch', 'companyType', 'companyCategory', 'companySort', 'companyDir', 'companyView', 'company'].forEach((key) => params.delete(key));
     }
 
     const nextSearch = params.toString();
@@ -426,7 +432,7 @@ const App = () => {
       internalSearchRef.current = nextSearchWithPrefix;
       navigate({ pathname: location.pathname, search: nextSearchWithPrefix }, { replace: true });
     }
-  }, [activeBatch.key, canonicalDashboardView, companyFilters, companySearch, companySort, companyView, isAdminRoute, isViewerAuthed, location.pathname, location.search, navigate, selectedCompanyId, selectedStudentId, studentFilters, studentSearch, studentSort, studentView]);
+  }, [activeBatch.key, activeBranchGroup, canonicalDashboardView, companyFilters, companySearch, companySort, companyView, isAdminRoute, isViewerAuthed, location.pathname, location.search, navigate, selectedCompanyId, selectedStudentId, studentFilters, studentSearch, studentSort, studentView]);
 
   useEffect(() => {
     if (location.pathname !== '/companies') return;
@@ -758,21 +764,28 @@ const App = () => {
     [isPlacementRecordsOnly, students]
   );
 
-  const dashboardBranchFilters = useMemo(
-    () => (isAggregateOnly ? ['ALL'] : ['ALL', ...dashboardBranchGroups]),
+  // Groups offered in the header: only those the loaded cohort actually has.
+  const availableBranchGroups = useMemo(
+    () => (isAggregateOnly ? [] : BRANCH_GROUPS.filter((group) => dashboardBranchGroups.includes(group))),
     [dashboardBranchGroups, isAggregateOnly]
   );
 
+  // A group that the newly selected batch does not have would silently filter everything away.
+  useEffect(() => {
+    if (activeBranchGroup === 'ALL' || loadedBatchKey !== activeBatch.key) return;
+    if (!availableBranchGroups.includes(activeBranchGroup)) setActiveBranchGroup('ALL');
+  }, [activeBatch.key, activeBranchGroup, availableBranchGroups, loadedBatchKey]);
+
   const filteredProgramSummaries = useMemo(
-    () => programSummaries.filter(({ branchGroup }) => dashboardBranchFilter === 'ALL' || branchGroup === dashboardBranchFilter),
-    [dashboardBranchFilter, programSummaries]
+    () => programSummaries.filter(({ branchGroup }) => activeBranchGroup === 'ALL' || branchGroup === activeBranchGroup),
+    [activeBranchGroup, programSummaries]
   );
 
   const activeOverviewSummary = useMemo(
     () => (isAggregateOnly
       ? stats.branch_summary?.overall || EMPTY_SLICE_SUMMARY
-      : dashboardBranchSummaries[dashboardBranchFilter] || EMPTY_SLICE_SUMMARY),
-    [dashboardBranchFilter, dashboardBranchSummaries, isAggregateOnly, stats.branch_summary]
+      : dashboardBranchSummaries[activeBranchGroup] || EMPTY_SLICE_SUMMARY),
+    [activeBranchGroup, dashboardBranchSummaries, isAggregateOnly, stats.branch_summary]
   );
 
   // One short line about where the numbers come from. Longer methodology stays in the metric
@@ -870,8 +883,8 @@ const App = () => {
     if (companyFilters.category) {
       result = result.filter((c) => (c.category || '').toUpperCase() === companyFilters.category.toUpperCase());
     }
-    if (companyFilters.branchGroup) {
-      result = result.filter((c) => (companyHiringStats[c.id]?.[companyFilters.branchGroup] || 0) > 0);
+    if (activeBranchGroup !== 'ALL') {
+      result = result.filter((c) => (companyHiringStats[c.id]?.[activeBranchGroup] || 0) > 0);
     }
     // Sort
     const { field, asc } = companySort;
@@ -904,7 +917,7 @@ const App = () => {
       return 0;
     });
     return result;
-  }, [companies, companySearch, companyFilters, companySort, companyHiringStats, isAdmin]);
+  }, [activeBranchGroup, companies, companySearch, companyFilters, companySort, companyHiringStats, isAdmin]);
 
   // Filtered and sorted students
   const filteredStudents = useMemo(() => {
@@ -914,10 +927,10 @@ const App = () => {
       const q = studentSearch.toLowerCase();
       result = result.filter((s) => s.name?.toLowerCase().includes(q) || s.roll_number?.toLowerCase().includes(q));
     }
-    // Filter by program
-    if (studentFilters.branchGroup) {
-      result = result.filter((s) => (s.branch_group || getBranchGroup(s.program)) === studentFilters.branchGroup);
+    if (activeBranchGroup !== 'ALL') {
+      result = result.filter((s) => (s.branch_group || getBranchGroup(s.program)) === activeBranchGroup);
     }
+    // Filter by program
     if (studentFilters.programs.length) {
       result = result.filter((s) => studentFilters.programs.includes(s.program));
     }
@@ -974,7 +987,7 @@ const App = () => {
       return 0;
     });
     return result;
-  }, [students, studentSearch, studentFilters, studentSort]);
+  }, [activeBranchGroup, students, studentSearch, studentFilters, studentSort]);
 
   const companyOverview = useMemo(() => {
     const totals = filteredCompanies.reduce((summary, company) => {
@@ -1005,7 +1018,6 @@ const App = () => {
     return {
       types: OFFER_TYPES.reduce((acc, type) => ({ ...acc, [type]: visibleCompanies.filter((company) => company.type === type).length }), {}),
       categories: ['A+', 'A', 'B'].reduce((acc, category) => ({ ...acc, [category]: visibleCompanies.filter((company) => (company.category || '').toUpperCase() === category).length }), {}),
-      branches: ['CSE', 'ECE', 'CB'].reduce((acc, branch) => ({ ...acc, [branch]: visibleCompanies.filter((company) => (companyHiringStats[company.id]?.[branch] || 0) > 0).length }), {}),
     };
   }, [companies, companyHiringStats, isAdmin]);
 
@@ -1025,7 +1037,6 @@ const App = () => {
   }, [filteredStudents]);
 
   const studentFilterCounts = useMemo(() => ({
-    branches: ['CSE', 'ECE', 'CB'].reduce((acc, branch) => ({ ...acc, [branch]: students.filter((student) => (student.branch_group || getBranchGroup(student.program)) === branch).length }), {}),
     statuses: STUDENT_STATUS_OPTIONS.reduce((acc, status) => ({ ...acc, [status]: students.filter((student) => student.placement_status === status).length }), {}),
     offerTypes: OFFER_TYPES.reduce((acc, type) => ({
       ...acc,
@@ -1039,8 +1050,8 @@ const App = () => {
 
   const dashboardVisuals = useMemo(() => {
     const cohortStudents = students.filter((student) => (
-      dashboardBranchFilter === 'ALL'
-      || getBranchGroup(student.program) === dashboardBranchFilter
+      activeBranchGroup === 'ALL'
+      || getBranchGroup(student.program) === activeBranchGroup
     ));
     // One value per student (their best package), matching how the median and average are computed.
     const ctcValues = cohortStudents
@@ -1075,7 +1086,7 @@ const App = () => {
       .slice(0, 5);
 
     return { compensationBands, branchComparison, recentCompanies };
-  }, [companies, dashboardBranchFilter, programSummaries, students]);
+  }, [activeBranchGroup, companies, programSummaries, students]);
 
   const companyVisuals = useMemo(() => ({
     categories: [
@@ -1392,6 +1403,15 @@ const App = () => {
                 ))}
               </select>
             </label>
+            {availableBranchGroups.length > 0 && (
+              <label className="nav-scope-select">
+                <span>Group</span>
+                <select value={activeBranchGroup} onChange={(event) => setActiveBranchGroup(event.target.value)}>
+                  <option value="ALL">Overall</option>
+                  {availableBranchGroups.map((group) => <option key={group} value={group}>{group}</option>)}
+                </select>
+              </label>
+            )}
           </div>
 
           <div className="nav-user-row">
@@ -1683,17 +1703,6 @@ const App = () => {
                   {stats.historical_reported_offers > 0 && <p>The same M.Tech 2025 view also includes the 2024-25 CSE aggregate: {stats.historical_reported_offers} reported offers across {stats.historical_recruiters} recruiters. These aggregate counts are labeled separately from student-linked offers.</p>}
                 </aside>
               )}
-              {!isOfficial2025 && (dashboardView === 'tracker' || dashboardView === 'programs' || dashboardView === 'compensation') && <section className="dashboard-control-row">
-                <span className="eyebrow">Branch</span>
-                <div className="filter-chip-row">
-                  {dashboardBranchFilters.map((branchGroup) => (
-                    <button key={branchGroup} type="button" className={dashboardBranchFilter === branchGroup ? 'filter-chip active' : 'filter-chip'} aria-pressed={dashboardBranchFilter === branchGroup} onClick={() => setDashboardBranchFilter(branchGroup)}>
-                      {DASHBOARD_BRANCH_LABELS[branchGroup] || branchGroup}
-                    </button>
-                  ))}
-                </div>
-              </section>}
-
               {!isOfficial2025 && dashboardView === 'compensation' && <section className="metric-ledger comp-ledger">
                 <MetricTile metricKey="highest_ctc" label="Highest CTC" value={formatInr(activeOverviewSummary.highest_ctc, 'p.a.')} note="Peak recorded package" />
                 <MetricTile metricKey="median_ctc" label="Median CTC" value={formatInr(activeOverviewSummary.median_ctc, 'p.a.')} note="Best package per student" />
@@ -1871,15 +1880,6 @@ const App = () => {
                       <option value="B">B ({companyFilterCounts.categories.B || 0})</option>
                     </select>
                   </label>}
-                  {!isAggregateOnly && <label className="filter-group">
-                    <span>Hiring branch</span>
-                    <select value={companyFilters.branchGroup} onChange={(e) => setCompanyFilters((f) => ({ ...f, branchGroup: e.target.value }))}>
-                      <option value="">All</option>
-                      <option value="CSE">CSE ({companyFilterCounts.branches.CSE || 0})</option>
-                      <option value="ECE">ECE ({companyFilterCounts.branches.ECE || 0})</option>
-                      <option value="CB">CB ({companyFilterCounts.branches.CB || 0})</option>
-                    </select>
-                  </label>}
                   <label className="sort-control">Sort
                     <select value={companySort.field} onChange={(event) => setCompanySort({ field: event.target.value, asc: event.target.value === 'name' })}>
                       <option value="name">Company name</option><option value="ctc">Highest CTC</option><option value="stipend">Highest stipend</option><option value="totalHired">Most hires</option><option value="offer_date">Latest offer date</option>
@@ -1890,11 +1890,10 @@ const App = () => {
                 </MobileDisclosure>
               </section>
 
-              {(companyFilters.type || companyFilters.category || companyFilters.branchGroup) && (
+              {(companyFilters.type || companyFilters.category) && (
                 <div className="applied-filter-row" aria-label="Active filters">
                   {companyFilters.type && <button type="button" className="applied-chip" aria-label={`Remove filter ${companyFilters.type}`} onClick={() => setCompanyFilters((f) => ({ ...f, type: '' }))}>{companyFilters.type}<span aria-hidden="true">×</span></button>}
                   {companyFilters.category && <button type="button" className="applied-chip" aria-label={`Remove category ${companyFilters.category}`} onClick={() => setCompanyFilters((f) => ({ ...f, category: '' }))}>Category {companyFilters.category}<span aria-hidden="true">×</span></button>}
-                  {companyFilters.branchGroup && <button type="button" className="applied-chip" aria-label={`Remove hiring branch ${companyFilters.branchGroup}`} onClick={() => setCompanyFilters((f) => ({ ...f, branchGroup: '' }))}>{companyFilters.branchGroup} hiring<span aria-hidden="true">×</span></button>}
                 </div>
               )}
 
@@ -2242,19 +2241,10 @@ const App = () => {
                   onChange={(e) => setStudentSearch(e.target.value)}
                 />
                 <MobileDisclosure
-                  summary={`Filters & sort${[studentFilters.branchGroup, studentFilters.status, studentFilters.offerType, ...studentFilters.programs].filter(Boolean).length ? ` · ${[studentFilters.branchGroup, studentFilters.status, studentFilters.offerType, ...studentFilters.programs].filter(Boolean).length} active` : ''}`}
+                  summary={`Filters & sort${[studentFilters.status, studentFilters.offerType, ...studentFilters.programs].filter(Boolean).length ? ` · ${[studentFilters.status, studentFilters.offerType, ...studentFilters.programs].filter(Boolean).length} active` : ''}`}
                   className="toolbar-disclosure"
                   contentClassName="toolbar-controls"
                 >
-                  <label className="filter-group">
-                    <span>Branch group</span>
-                    <select value={studentFilters.branchGroup} onChange={(e) => setStudentFilters((f) => ({ ...f, branchGroup: e.target.value }))}>
-                      <option value="">All</option>
-                      <option value="CSE">CSE ({studentFilterCounts.branches.CSE || 0})</option>
-                      <option value="ECE">ECE ({studentFilterCounts.branches.ECE || 0})</option>
-                      <option value="CB">CB ({studentFilterCounts.branches.CB || 0})</option>
-                    </select>
-                  </label>
                   <label className="filter-group">
                     <span>Status</span>
                     <select value={studentFilters.status} onChange={(e) => setStudentFilters((f) => ({ ...f, status: e.target.value }))}>
@@ -2276,7 +2266,7 @@ const App = () => {
                       <option value="roll_number">Roll number</option><option value="name">Name</option><option value="ctc">Highest CTC</option><option value="stipend">Highest stipend</option><option value="offer_date">Latest offer</option>
                     </select>
                   </label>
-                  {(studentSearch || studentFilters.branchGroup || studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0) && <button type="button" className="secondary clear-filters-button" onClick={() => { setStudentSearch(''); setStudentFilters(DEFAULT_STUDENT_FILTERS); }}>Clear filters</button>}
+                  {(studentSearch || studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0) && <button type="button" className="secondary clear-filters-button" onClick={() => { setStudentSearch(''); setStudentFilters(DEFAULT_STUDENT_FILTERS); }}>Clear filters</button>}
                   {isAdmin && (isOverallScope
                     ? <span className="subtext add-scope-hint" title="The Overall view spans both degrees">Switch to a specific batch (B.Tech / M.Tech) to add a student</span>
                     : <button onClick={() => { setEditStudent(null); setShowStudentModal(true); }}>Add student</button>)}
@@ -2310,9 +2300,8 @@ const App = () => {
                 </MobileDisclosure>
               )}
 
-              {(studentFilters.branchGroup || studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0) && (
+              {(studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0) && (
                 <div className="applied-filter-row" aria-label="Active filters">
-                  {studentFilters.branchGroup && <button type="button" className="applied-chip" aria-label={`Remove branch ${studentFilters.branchGroup}`} onClick={() => setStudentFilters((f) => ({ ...f, branchGroup: '' }))}>{studentFilters.branchGroup}<span aria-hidden="true">×</span></button>}
                   {studentFilters.status && <button type="button" className="applied-chip" aria-label={`Remove status ${studentFilters.status}`} onClick={() => setStudentFilters((f) => ({ ...f, status: '' }))}>{studentFilters.status}<span aria-hidden="true">×</span></button>}
                   {studentFilters.offerType && <button type="button" className="applied-chip" aria-label={`Remove offer type ${studentFilters.offerType}`} onClick={() => setStudentFilters((f) => ({ ...f, offerType: '' }))}>{studentFilters.offerType}<span aria-hidden="true">×</span></button>}
                   {studentFilters.programs.map((program) => <button key={program} type="button" className="applied-chip" aria-label={`Remove program ${program}`} onClick={() => toggleProgramFilter(program)}>{program}<span aria-hidden="true">×</span></button>)}
@@ -2366,7 +2355,7 @@ const App = () => {
                       })}
                     </tbody>
                   </table>
-                  {!filteredStudents.length && <div className="empty-directory-state"><h3>No student records found.</h3><p>{studentSearch || studentFilters.branchGroup || studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0 ? 'No student matches the active filters.' : 'No student records are available for this cohort yet.'}</p>{(studentSearch || studentFilters.branchGroup || studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0) && <button type="button" className="secondary" onClick={() => { setStudentSearch(''); setStudentFilters(DEFAULT_STUDENT_FILTERS); }}>Clear filters</button>}</div>}
+                  {!filteredStudents.length && <div className="empty-directory-state"><h3>No student records found.</h3><p>{studentSearch || studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0 ? 'No student matches the active filters.' : 'No student records are available for this cohort yet.'}</p>{(studentSearch || studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0) && <button type="button" className="secondary" onClick={() => { setStudentSearch(''); setStudentFilters(DEFAULT_STUDENT_FILTERS); }}>Clear filters</button>}</div>}
                 </section>
               ) : (
               <section className="student-card-grid">
@@ -2402,7 +2391,7 @@ const App = () => {
                     </article>
                   );
                 })}
-                {!filteredStudents.length && <div className="empty-directory-state"><h3>No student records found.</h3><p>{studentSearch || studentFilters.branchGroup || studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0 ? 'No student matches the active filters.' : 'No student records are available for this cohort yet.'}</p>{(studentSearch || studentFilters.branchGroup || studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0) && <button type="button" className="secondary" onClick={() => { setStudentSearch(''); setStudentFilters(DEFAULT_STUDENT_FILTERS); }}>Clear filters</button>}</div>}
+                {!filteredStudents.length && <div className="empty-directory-state"><h3>No student records found.</h3><p>{studentSearch || studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0 ? 'No student matches the active filters.' : 'No student records are available for this cohort yet.'}</p>{(studentSearch || studentFilters.status || studentFilters.offerType || studentFilters.programs.length > 0) && <button type="button" className="secondary" onClick={() => { setStudentSearch(''); setStudentFilters(DEFAULT_STUDENT_FILTERS); }}>Clear filters</button>}</div>}
               </section>
               )}
 

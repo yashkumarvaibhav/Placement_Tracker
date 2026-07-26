@@ -11,13 +11,6 @@ const isPlacementEligibleStudent = (student) => !['not sitting', 'ineligible'].i
   String(student?.placement_status || '').trim().toLowerCase()
 );
 
-const DASHBOARD_BRANCH_LABELS = {
-  ALL: 'All programs',
-  CSE: 'CSE group',
-  ECE: 'ECE group',
-  CB: 'CB group',
-  OTHER: 'Other programs',
-};
 
 const EMPTY_SLICE_SUMMARY = {
   total_students: 0,
@@ -203,7 +196,6 @@ export {
   BRANCH_GROUP_ORDER,
   STUDENT_STATUS_OPTIONS,
   isPlacementEligibleStudent,
-  DASHBOARD_BRANCH_LABELS,
   EMPTY_SLICE_SUMMARY,
   sortPrograms,
   getStudentOffers,
