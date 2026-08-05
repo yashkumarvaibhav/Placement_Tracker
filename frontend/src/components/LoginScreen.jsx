@@ -52,7 +52,7 @@ const LoginScreen = ({ assetBase, onSuccess, onError, error, pending, themeMode,
           </div>
           {pending && <span className="verification-status">Verifying access...</span>}
           <div className="privacy-note">
-            <strong>Google sign-in is the only way in. Shared viewer usernames and passwords are no longer accepted.</strong>
+            <strong>Access is read-only and limited to verified {INSTITUTE.name} Google accounts.</strong>
             <span>Your Google address is never shown to viewers. It is used privately to link your roster identity and audit any skill ratings you submit.</span>
           </div>
         </div>
