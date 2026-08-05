@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import app from './app.js';
-import { PORT } from './config.js';
+import { PORT, SITE_TAKEDOWN } from './config.js';
 import { setDbReady } from './ready.js';
 import { deleteAppSettings, ensureOfferBackfill, initDb } from './db.js';
 import { startPlacementCalendarAutoSync } from './calendar-sync.js';
@@ -29,7 +29,13 @@ const start = async () => {
       dbReady = true;
       setDbReady(true);
       console.log('Database initialized successfully');
-      startPlacementCalendarAutoSync();
+      // A suspended site should not keep pushing calendar-change notifications to people who
+      // can no longer open it.
+      if (SITE_TAKEDOWN) {
+        console.log('SITE_TAKEDOWN is on: Placement Calendar auto-sync and its notifications are paused.');
+      } else {
+        startPlacementCalendarAutoSync();
+      }
     } catch (err) {
       console.error('Failed to connect to DB, retrying in 10s...', err.message);
       await new Promise(res => setTimeout(res, 10000));
