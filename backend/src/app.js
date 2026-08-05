@@ -1,7 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
-import { PLACEMENT_ATLAS_HOST, frontendDistPath, portfolioDistPath } from './config.js';
+import { PLACEMENT_ATLAS_HOST, SITE_TAKEDOWN, frontendDistPath, portfolioDistPath } from './config.js';
+import takedownGate from './takedown.js';
 import authRoutes from './routes/auth.js';
 import adminRoutes from './routes/admin.js';
 import companiesRoutes from './routes/companies.js';
@@ -21,6 +22,19 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+// Liveness probe for the systemd healthcheck timer. It answers only on the loopback hostname,
+// so it stays invisible on the public hostnames, and it sits ahead of the takedown gate so a
+// deliberately suspended site is not mistaken for a dead process and restart-looped.
+app.get('/healthz', (req, res, next) => {
+  if (!['127.0.0.1', 'localhost', '::1', '[::1]'].includes(req.hostname)) return next();
+  res.set('Cache-Control', 'no-store');
+  return res.json({ status: 'ok', takedown: SITE_TAKEDOWN });
+});
+
+// Ahead of the routes but behind CORS, so a browser tab still holding the old bundle reads the
+// takedown message instead of a cross-origin error.
+app.use(takedownGate);
+
 app.use(express.json());
 
 app.use('/api/auth', authRoutes);

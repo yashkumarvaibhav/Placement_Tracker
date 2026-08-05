@@ -38,6 +38,13 @@ npm run dev             # http://localhost:5173/
 - The portfolio is served from `yashkumarvaibhav.me`. Placement Atlas is served from `placement-atlas.yashkumarvaibhav.me`.
 - Requests to `yashkumarvaibhav.me/Placement_Tracker/` permanently redirect to the Placement Atlas subdomain.
 
+## Site takedown
+- Placement Atlas is currently **taken down**. Every request to `placement-atlas.yashkumarvaibhav.me` and every `/api/*` route answers `503` with the takedown notice — no landing page, no sign-in, no data.
+- The switch is `SITE_TAKEDOWN` in `backend/.env` (`backend/src/takedown.js`). It is on unless the value is exactly `off`.
+- The portfolio on `yashkumarvaibhav.me`, served by the same process, is deliberately untouched — the notice points people there.
+- `placement-tracker-healthcheck.service` probes `/healthz` rather than `/api/ping`, because a suspended API is not a dead process. `/healthz` answers on the loopback hostname only.
+- To bring the site back: set `SITE_TAKEDOWN=off` in `backend/.env`, then `systemctl --user restart placement-tracker.service`.
+
 ## Viewer access
 - Google sign-in is verified by the backend against `GOOGLE_CLIENT_ID` and the `iiitd.ac.in` hosted domain. It is the only way to sign in.
 - The shared viewer username and password login was removed. `POST /api/auth/viewer` now answers `410`, sessions minted by it are rejected, and the stored credentials are deleted from `app_settings` on startup.
