@@ -2,8 +2,7 @@ import 'dotenv/config';
 import app from './app.js';
 import { PORT } from './config.js';
 import { setDbReady } from './ready.js';
-import { ensureDefaultViewerCredentials } from './auth.js';
-import { ensureOfferBackfill, initDb } from './db.js';
+import { deleteAppSettings, ensureOfferBackfill, initDb } from './db.js';
 import { startPlacementCalendarAutoSync } from './calendar-sync.js';
 
 // This deployment runs as a bare `node` process with no supervisor, so an escaped rejection
@@ -24,7 +23,9 @@ const start = async () => {
   while (!dbReady) {
     try {
       await initDb();
-      await ensureDefaultViewerCredentials();
+      // Shared viewer username/password sign-in is gone; drop the stored credentials so no
+      // hash survives in the database.
+      await deleteAppSettings(['viewer_username', 'viewer_password_hash']);
       dbReady = true;
       setDbReady(true);
       console.log('Database initialized successfully');

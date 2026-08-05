@@ -5,16 +5,12 @@ import {
   bearerToken,
   createAdminSession,
   createViewerSession,
-  getViewerCredentials,
   getRatingEmail,
   isValidAdminSession,
   ratingAccountId,
   requireViewerAuth,
-  safeEqual,
-  verifyPassword,
 } from '../auth.js';
 import { getRatingViewerContext } from '../db.js';
-import { requireDbReady } from '../ready.js';
 import { ADMIN_EMAIL, ADMIN_SESSION_TTL_MS, GOOGLE_CLIENT_ID, VIEWER_SESSION_TTL_MS } from '../config.js';
 
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
@@ -50,25 +46,10 @@ router.post('/google', authRateLimiter, async (req, res) => {
   }
 });
 
-router.post('/viewer', authRateLimiter, requireDbReady, async (req, res) => {
-  try {
-    const username = String(req.body?.username || '').trim().toLowerCase();
-    const password = String(req.body?.password || '');
-    const credentials = await getViewerCredentials();
-    const usernameValid = safeEqual(username, credentials.username.trim().toLowerCase());
-    const passwordValid = credentials.passwordHash
-      ? await verifyPassword(password, credentials.passwordHash)
-      : false;
-
-    if (!usernameValid || !passwordValid) {
-      return res.status(401).json({ message: 'Incorrect viewer username or password.' });
-    }
-
-    return res.json({ token: createViewerSession(), expires_in: VIEWER_SESSION_TTL_MS / 1000 });
-  } catch {
-    return res.status(500).json({ message: 'Viewer sign-in could not be completed.' });
-  }
-});
+// The shared viewer username/password sign-in was removed: Google is the only way in.
+router.post('/viewer', authRateLimiter, (_req, res) => res.status(410).json({
+  message: 'Viewer username and password sign-in has been removed. Please continue with your IIIT Delhi Google account.',
+}));
 
 router.get('/session', requireViewerAuth, async (req, res, next) => {
   try {

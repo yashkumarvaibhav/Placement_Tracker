@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authMiddleware, getViewerCredentials, hashPassword } from '../auth.js';
+import { authMiddleware } from '../auth.js';
 import { requireDbReady } from '../ready.js';
 import { PLACEMENT_ATLAS_HOST } from '../config.js';
 import {
@@ -32,34 +32,6 @@ router.get('/health', authMiddleware, async (_req, res) => {
     res.json({ status: 'ok', db: { host: process.env.PGHOST, database: process.env.PGDATABASE }, counts });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
-  }
-});
-
-router.get('/viewer-access', authMiddleware, requireDbReady, async (_req, res) => {
-  try {
-    const credentials = await getViewerCredentials();
-    return res.json({ username: credentials.username });
-  } catch {
-    return res.status(500).json({ message: 'Viewer access settings could not be loaded.' });
-  }
-});
-
-router.put('/viewer-access', authMiddleware, requireDbReady, async (req, res) => {
-  const username = String(req.body?.username || '').trim().toLowerCase();
-  const password = String(req.body?.password || '');
-
-  if (!username || password.length < 12) {
-    return res.status(400).json({ message: 'Enter a username and a password of at least 12 characters.' });
-  }
-
-  try {
-    await setAppSettings({
-      viewer_username: username,
-      viewer_password_hash: await hashPassword(password),
-    });
-    return res.json({ username });
-  } catch {
-    return res.status(500).json({ message: 'Viewer access settings could not be updated.' });
   }
 });
 

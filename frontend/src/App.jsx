@@ -28,13 +28,13 @@ import { ConvertToPpo } from './components/ConvertToPpo';
 import { CompanyForm } from './components/CompanyForm';
 import { StudentForm } from './components/StudentForm';
 import { LoginScreen } from './components/LoginScreen';
+import { SiteFooter } from './components/SiteDisclaimer';
 import {
   RatingsAnalytics,
   RatingsIntro,
   SkillRatingForm,
   SkillRatingSummary,
 } from './components/SkillRatings';
-import { ViewerAccessSettings } from './components/ViewerAccessSettings';
 import { BRANCH_OPTIONS, branchToken, companyRecruitsDegree, formatBranchToken } from './lib/branches';
 import {
   BRANCH_GROUP_ORDER,
@@ -284,22 +284,6 @@ const App = () => {
   const handleGoogleError = () => {
     googleLogout();
     setLoginError('Google sign-in failed. Please try again.');
-  };
-
-  const handleViewerLogin = async ({ username, password }) => {
-    setAuthPending(true);
-    setLoginError('');
-
-    try {
-      const response = await api.post('/auth/viewer', { username, password });
-      setViewerToken(response.data.token);
-      storeViewerToken(response.data.token);
-      setToken('');
-    } catch (err) {
-      setLoginError(err.response?.data?.message || 'Viewer sign-in could not be completed.');
-    } finally {
-      setAuthPending(false);
-    }
   };
 
   const handleGoogleLogout = () => {
@@ -808,7 +792,7 @@ const App = () => {
 
   const openSkillRating = (student) => {
     if (!sessionDetails?.can_rate) {
-      window.alert('Skill ratings require your individual IIIT Delhi Google sign-in. Shared viewer access can see averages only.');
+      window.alert('Skill ratings require your individual IIIT Delhi Google sign-in. Please sign out and sign in again.');
       return;
     }
     const studentId = student?.id ?? student?.student_id;
@@ -1510,7 +1494,6 @@ const App = () => {
         assetBase={assetBase}
         onSuccess={handleGoogleSuccess}
         onError={handleGoogleError}
-        onViewerLogin={handleViewerLogin}
         error={loginError}
         pending={authPending}
         themeMode={themeMode}
@@ -1595,7 +1578,6 @@ const App = () => {
               )}
               <button className="secondary nav-signout" title="End viewer session" onClick={() => { closeMobileNav(); handleGoogleLogout(); }}>Sign out</button>
               {isAdmin && <Link className="nav-admin-link" to="/admin/calendar" onClick={closeMobileNav}>Calendar</Link>}
-              {isAdmin && <Link className="nav-admin-link" to="/admin" onClick={closeMobileNav}>Viewer Access</Link>}
             </div>
           </div>
         </div>
@@ -1993,7 +1975,7 @@ const App = () => {
 
               <aside className="disclaimer-card">
                 <span className="eyebrow">Data note</span>
-                <p>Unofficial side project, not verified by the Placement Office. Report discrepancies to yash25091@iiitd.ac.in.</p>
+                <p>Compiled by hand from student-shared records, so treat every figure as a reference rather than an official count.</p>
                 <Link to="/admin">Administrative access</Link>
               </aside>
             </main>
@@ -2644,10 +2626,7 @@ const App = () => {
           )}
         />
 
-        <Route
-          path="/admin"
-          element={adminRoute(<ViewerAccessSettings authHeaders={authHeaders} />)}
-        />
+        <Route path="/admin" element={<Navigate to="/admin/calendar" replace />} />
         <Route
           path="/admin/calendar"
           element={adminRoute(
@@ -2658,6 +2637,7 @@ const App = () => {
         />
       </Routes>
       )}
+      <SiteFooter />
       <RatingsIntro
         open={showRatingsIntro}
         canRate={Boolean(sessionDetails?.can_rate)}

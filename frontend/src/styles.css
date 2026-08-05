@@ -516,11 +516,6 @@ header:focus-within { transform: translateY(0) !important; }
 .access-card-body > p strong { color: var(--text-strong); }
 .google-login-wrap { min-height: 44px; display: flex; align-items: center; margin-top: 24px; transition: opacity .16s ease; }
 .google-login-wrap.is-pending { pointer-events: none; opacity: .5; }
-.access-divider { display: flex; align-items: center; gap: 12px; margin: 18px 0; color: var(--text-faint); font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-.access-divider::before, .access-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
-.viewer-login-form { gap: 11px; }
-.viewer-login-form > p { margin-bottom: 2px; color: var(--text-muted); font-size: .76rem; }
-.viewer-login-form button { width: 100%; margin-top: 4px; }
 .access-error { margin-top: 16px; border: 1px solid rgba(141,42,42,.22); border-radius: var(--radius-sm); background: rgba(141,42,42,.06); padding: 10px 12px; font-size: .76rem; }
 .verification-status { display: block; margin-top: 9px; color: var(--text-faint); font-size: .7rem; }
 .privacy-note { display: grid; gap: 4px; margin-top: 24px; border-top: 1px solid var(--border); padding-top: 18px; }
@@ -615,9 +610,14 @@ header:focus-within { transform: translateY(0) !important; }
 .landing-feature-grid article { padding: 18px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--bg-raised); }
 .landing-feature-grid h3 { margin: 0 0 6px; font-size: 1.1rem; }
 .landing-feature-grid p { color: var(--text-muted); font-size: .82rem; }
-.landing-footer { width: min(1240px, calc(100% - 48px)); margin: 0 auto; display: grid; grid-template-columns: 1.2fr .8fr; gap: 32px; padding: 22px 0 30px; color: var(--text-faint); font-size: .76rem; }
-.landing-footer strong { color: var(--text-strong); }
-.landing-footer span { text-align: right; }
+.landing-footer { width: min(1240px, calc(100% - 48px)); margin: 0 auto; padding: 22px 0 30px; }
+
+/* Shared "not an official record" notice: a bordered panel on the landing hero, plain text in
+   the footer that every page carries. */
+.site-disclaimer { display: grid; gap: 6px; color: var(--text-faint); font-size: .76rem; line-height: 1.55; }
+.site-disclaimer strong { color: var(--text-strong); font-weight: 700; }
+.site-disclaimer.is-panel { max-width: 680px; margin-top: 26px; border-left: 2px solid var(--accent-hover); padding: 4px 0 4px 14px; }
+.site-footer { margin-top: 48px; border-top: 1px solid var(--border); background: var(--bg-sidebar); padding: 20px 0 max(26px, env(safe-area-inset-bottom)); }
 .table { width: 100%; border-collapse: collapse; }.table th, .table td { padding: 10px; border-bottom: 1px solid var(--border); text-align: left; font-size: .78rem; }.table th { color: var(--text-faint); font-size: .65rem; text-transform: uppercase; letter-spacing: .06em; }
 
 @media (max-width: 1050px) {
@@ -637,7 +637,7 @@ header:focus-within { transform: translateY(0) !important; }
   .official-offer-geography { grid-template-columns: 1fr 1fr; }
   .historical-summary-grid { grid-template-columns: 1fr; }.historical-summary-grid .metric-tile { border-right: 0; border-bottom: 1px solid var(--border); }.historical-summary-grid .metric-tile:last-child { border-bottom: 0; }
   .calendar-admin-hero { grid-template-columns: 1fr; align-items: start; }.calendar-admin-actions { justify-content: flex-start; }.calendar-admin-grid { grid-template-columns: 1fr; }.calendar-sheet-controls { justify-content: flex-start; }.calendar-metric-grid { grid-template-columns: 1fr 1fr; }.calendar-metric:nth-child(2n) { border-right: 0; }.calendar-metric:nth-child(-n+4) { border-bottom: 1px solid var(--border); }
-  .landing-hero { grid-template-columns: 1fr; padding-top: 36px; }.landing-hero-copy h1 { max-width: 680px; }.access-card { width: min(520px, 100%); }.landing-feature-grid { grid-template-columns: 1fr; }.landing-footer { grid-template-columns: 1fr; gap: 16px; }.landing-footer span { text-align: left; }
+  .landing-hero { grid-template-columns: 1fr; padding-top: 36px; }.landing-hero-copy h1 { max-width: 680px; }.access-card { width: min(520px, 100%); }.landing-feature-grid { grid-template-columns: 1fr; }
   .container { width: min(100% - 30px, 720px); }.navbar { width: calc(100% - 28px); min-height: 60px; gap: 8px; }.nav-main-links { flex-direction: column; align-items: stretch; padding: 10px 0; border-top: 1px solid var(--border); }.nav-user-row, .nav-actions { flex: 1 1 100%; flex-direction: column; align-items: stretch; }.nav-actions button, .nav-actions a { width: 100%; }.header-hidden { transform: translateY(calc(-100% + 10px)); }
   .directory-hero { grid-template-columns: 1fr; gap: 18px; }.metric-ledger { grid-template-columns: repeat(2, 1fr); }.metric-tile:nth-child(2) { border-right: 0; }.metric-tile:nth-child(-n+2) { border-bottom: 1px solid var(--border); }.insight-grid { grid-template-columns: 1fr; }.outcome-panel { grid-row: auto; }.compensation-panel { grid-column: auto; }.directory-insights, .student-status-overview { grid-template-columns: 1fr; }.student-directory-hero { grid-template-columns: 1fr 200px; }.directory-toolbar .search-input { flex-basis: 100%; }.directory-toolbar .filter-group, .directory-toolbar .sort-control { flex: 1 1 150px; }
 }

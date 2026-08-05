@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 
@@ -51,10 +52,23 @@ vi.mock('../src/db.js', () => ({
 const { default: app } = await import('../src/app.js');
 const { createAdminSession, createViewerSession } = await import('../src/auth.js');
 const { setDbReady } = await import('../src/ready.js');
+const { SESSION_SECRET } = await import('../src/config.js');
 const db = await import('../src/db.js');
 
-const asViewer = () => `Bearer ${createViewerSession()}`;
+const asViewer = () => `Bearer ${createViewerSession('viewer25001@iiitd.ac.in')}`;
 const asAdmin = () => `Bearer ${createAdminSession()}`;
+
+// Mints a token the way the retired shared username/password login used to, so the tests can
+// prove those sessions no longer open any door.
+const asRetiredSharedViewer = () => {
+  const payload = Buffer.from(JSON.stringify({
+    type: 'viewer',
+    auth_source: 'shared',
+    expires_at: Date.now() + 60_000,
+  })).toString('base64url');
+  const signature = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
+  return `Bearer ${payload}.${signature}`;
+};
 
 beforeEach(() => {
   setDbReady(true);
@@ -77,6 +91,21 @@ describe('login wall on data routes', () => {
     const forged = `${asViewer()}x`;
     const res = await request(app).get('/api/students?cycle=2027').set('Authorization', forged);
     expect(res.status).toBe(401);
+  });
+
+  it('rejects sessions from the retired shared viewer login even before they expire', async () => {
+    const res = await request(app)
+      .get('/api/students?cycle=2027')
+      .set('Authorization', asRetiredSharedViewer());
+    expect(res.status).toBe(401);
+  });
+
+  it('no longer accepts a viewer username and password', async () => {
+    const res = await request(app)
+      .post('/api/auth/viewer')
+      .set('X-Forwarded-For', '203.0.113.7')
+      .send({ username: 'guest@placement-atlas', password: 'whatever-it-used-to-be' });
+    expect(res.status).toBe(410);
   });
 
   it('serves data to a signed-in viewer', async () => {
@@ -180,12 +209,12 @@ describe('skill ratings privacy and update policy', () => {
     }));
   });
 
-  it('does not let an unidentifiable shared viewer submit ratings', async () => {
+  it('does not let an unidentifiable legacy session submit ratings', async () => {
     const res = await request(app)
       .put('/api/ratings/1')
-      .set('Authorization', asViewer())
+      .set('Authorization', asRetiredSharedViewer())
       .send({ overall: 8, dsa: 9, ml: 7 });
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
     expect(db.saveSkillRating).not.toHaveBeenCalled();
   });
 
@@ -280,13 +309,13 @@ describe('operational endpoints', () => {
 });
 
 describe('auth rate limiting', () => {
-  it('throttles repeated viewer sign-in attempts from one client', async () => {
+  it('throttles repeated sign-in attempts from one client', async () => {
     let lastStatus = null;
     for (let i = 0; i < 25; i++) {
       const res = await request(app)
-        .post('/api/auth/viewer')
+        .post('/api/auth/google')
         .set('X-Forwarded-For', '203.0.113.99')
-        .send({ username: 'nope', password: 'wrong-password' });
+        .send({ credential: 'not-a-real-google-credential' });
       lastStatus = res.status;
     }
     expect(lastStatus).toBe(429);

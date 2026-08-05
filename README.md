@@ -39,9 +39,8 @@ npm run dev             # http://localhost:5173/
 - Requests to `yashkumarvaibhav.me/Placement_Tracker/` permanently redirect to the Placement Atlas subdomain.
 
 ## Viewer access
-- Google sign-in is verified by the backend against `GOOGLE_CLIENT_ID` and the `iiitd.ac.in` hosted domain.
-- Initial shared viewer credentials are configured with `VIEWER_USERNAME` and `VIEWER_PASSWORD`, then seeded into the database as an Argon2id hash.
-- An authenticated admin can replace the shared viewer username and password from the Admin page. Updated passwords are stored as Argon2id hashes.
+- Google sign-in is verified by the backend against `GOOGLE_CLIENT_ID` and the `iiitd.ac.in` hosted domain. It is the only way to sign in.
+- The shared viewer username and password login was removed. `POST /api/auth/viewer` now answers `410`, sessions minted by it are rejected, and the stored credentials are deleted from `app_settings` on startup.
 - Google email addresses are used for domain verification and a private roster-to-account
   mapping supports self-rating. A submitted rating keeps its email attribution for audit,
   visible only in the admin-only Ratings analytics screen; viewer-facing APIs expose only

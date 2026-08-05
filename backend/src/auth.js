@@ -1,11 +1,7 @@
 import crypto from 'crypto';
-import argon2 from 'argon2';
-import { getAppSettings, setAppSettings } from './db.js';
 import {
   ADMIN_EMAIL,
   ADMIN_SESSION_TTL_MS,
-  DEFAULT_VIEWER_PASSWORD,
-  DEFAULT_VIEWER_USERNAME,
   SESSION_SECRET,
   VIEWER_SESSION_TTL_MS,
 } from './config.js';
@@ -33,10 +29,10 @@ const readSignedSession = (token) => {
   }
 };
 
-export const createViewerSession = (email = '') => createSignedSession({
+export const createViewerSession = (email) => createSignedSession({
   type: 'viewer',
-  auth_source: email ? 'google' : 'shared',
-  email: String(email || '').trim().toLowerCase() || undefined,
+  auth_source: 'google',
+  email: String(email || '').trim().toLowerCase(),
   expires_at: Date.now() + VIEWER_SESSION_TTL_MS,
 });
 
@@ -48,9 +44,13 @@ export const createAdminSession = (email = ADMIN_EMAIL) => createSignedSession({
   expires_at: Date.now() + ADMIN_SESSION_TTL_MS,
 });
 
+// Viewer access is Google-only: sessions minted by the retired shared username/password login
+// carry auth_source 'shared' and are rejected here, so any that are still in flight stop working.
 export const isValidViewerSession = (token) => {
   const session = readSignedSession(token);
-  return session?.type === 'viewer' && Number(session.expires_at) > Date.now();
+  return session?.type === 'viewer'
+    && session.auth_source === 'google'
+    && Number(session.expires_at) > Date.now();
 };
 
 export const isValidAdminSession = (token) => {
@@ -61,9 +61,9 @@ export const isValidAdminSession = (token) => {
     && Number(session.expires_at) > Date.now();
 };
 
-// Minimal in-memory limiter for the auth endpoints: argon2 verification is deliberately
-// expensive, so unthrottled guessing is both a brute-force and a CPU-DoS vector. Per-process
-// state is fine for this single-instance deployment.
+// Minimal in-memory limiter for the auth endpoints: Google token verification is comparatively
+// expensive, so unthrottled retries are a CPU and upstream-quota drain. Per-process state is
+// fine for this single-instance deployment.
 const AUTH_RATE_WINDOW_MS = 5 * 60 * 1000;
 const AUTH_RATE_MAX_ATTEMPTS = 20;
 const authAttempts = new Map();
@@ -83,55 +83,6 @@ export const authRateLimiter = (req, res, next) => {
   return next();
 };
 
-export const safeEqual = (left, right) => {
-  const leftBuffer = Buffer.from(String(left));
-  const rightBuffer = Buffer.from(String(right));
-  return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
-};
-
-export const hashPassword = (password) => argon2.hash(password, {
-  type: argon2.argon2id,
-  memoryCost: 65536,
-  timeCost: 3,
-  parallelism: 1,
-});
-
-const verifyLegacyScryptPassword = (password, storedHash) => {
-  const [algorithm, salt, expectedHash] = String(storedHash || '').split('$');
-  if (algorithm !== 'scrypt' || !salt || !expectedHash) return false;
-
-  const actual = crypto.scryptSync(password, salt, 64);
-  const expected = Buffer.from(expectedHash, 'base64url');
-  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
-};
-
-export const verifyPassword = async (password, storedHash) => {
-  if (String(storedHash).startsWith('$argon2id$')) {
-    return argon2.verify(storedHash, password);
-  }
-  return verifyLegacyScryptPassword(password, storedHash);
-};
-
-export const getViewerCredentials = async () => {
-  const settings = await getAppSettings(['viewer_username', 'viewer_password_hash']);
-  return {
-    username: settings.viewer_username || DEFAULT_VIEWER_USERNAME,
-    passwordHash: settings.viewer_password_hash || '',
-  };
-};
-
-export const ensureDefaultViewerCredentials = async () => {
-  const settings = await getAppSettings(['viewer_username', 'viewer_password_hash']);
-  const defaults = {};
-
-  if (!settings.viewer_username) defaults.viewer_username = DEFAULT_VIEWER_USERNAME;
-  if (!settings.viewer_password_hash && DEFAULT_VIEWER_PASSWORD) {
-    defaults.viewer_password_hash = await hashPassword(DEFAULT_VIEWER_PASSWORD);
-  }
-
-  await setAppSettings(defaults);
-};
-
 export const bearerToken = (req) => {
   const auth = req.headers.authorization || '';
   return auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
@@ -145,7 +96,7 @@ export const getAuthenticatedSession = (req) => {
     && session.subject === 'primary-admin') {
     return session;
   }
-  if (session.type === 'viewer') return session;
+  if (session.type === 'viewer' && session.auth_source === 'google') return session;
   return null;
 };
 
@@ -163,7 +114,7 @@ export const getRatingEmail = (req) => {
 
 export const ratingAccountId = (req) => {
   const email = getRatingEmail(req);
-  const identity = email || 'shared-viewer';
+  const identity = email || 'unidentified';
   return crypto.createHmac('sha256', SESSION_SECRET).update(`ratings:${identity}`).digest('base64url').slice(0, 18);
 };
 

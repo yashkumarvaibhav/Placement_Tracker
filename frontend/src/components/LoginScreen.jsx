@@ -1,13 +1,10 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { GoogleLogin } from '@react-oauth/google';
 import { ThemeToggle } from './ui';
+import { SiteDisclaimer } from './SiteDisclaimer';
 import { DASHBOARD_TITLE, INSTITUTE, PRODUCT_NAME } from '../institute';
 
-const LoginScreen = ({ assetBase, onSuccess, onError, onViewerLogin, error, pending, themeMode, onToggleTheme }) => {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-
-  return (
+const LoginScreen = ({ assetBase, onSuccess, onError, error, pending, themeMode, onToggleTheme }) => (
     <main className="landing-page">
     <nav className="landing-nav">
       <a className="landing-brand" href="#top" aria-label={`${PRODUCT_NAME} home`}>
@@ -25,9 +22,10 @@ const LoginScreen = ({ assetBase, onSuccess, onError, onViewerLogin, error, pend
         <p>Cohort outcomes, recruiter records, and compensation context in one searchable, student-built reference.</p>
         <div className="landing-principles" aria-label="Access and privacy summary">
           <span><i>01</i> Restricted to {INSTITUTE.name} students</span>
-          <span><i>02</i> Verified with Google or viewer credentials</span>
+          <span><i>02</i> Verified with an institute Google account</span>
           <span><i>03</i> Built for internal, responsible use</span>
         </div>
+        <SiteDisclaimer />
       </div>
 
       <aside className="access-card" aria-labelledby="access-heading">
@@ -52,42 +50,9 @@ const LoginScreen = ({ assetBase, onSuccess, onError, onViewerLogin, error, pend
               text="signin_with"
             />
           </div>
-          <div className="access-divider"><span>or use viewer access</span></div>
-          <form
-            className="viewer-login-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              onViewerLogin({ username, password });
-            }}
-          >
-            <p>Contact the developer for a viewer username and password.</p>
-            <label>
-              Username
-              <input
-                type="text"
-                autoComplete="username"
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
-                disabled={pending}
-                required
-              />
-            </label>
-            <label>
-              Password
-              <input
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                disabled={pending}
-                required
-              />
-            </label>
-            <button type="submit" disabled={pending}>{pending ? 'Verifying...' : 'Continue as viewer'}</button>
-          </form>
           {pending && <span className="verification-status">Verifying access...</span>}
           <div className="privacy-note">
-            <strong>Viewer access is read-only and cannot grant admin permissions.</strong>
+            <strong>Google sign-in is the only way in. Shared viewer usernames and passwords are no longer accepted.</strong>
             <span>Your Google address is never shown to viewers. It is used privately to link your roster identity and audit any skill ratings you submit.</span>
           </div>
         </div>
@@ -104,11 +69,9 @@ const LoginScreen = ({ assetBase, onSuccess, onError, onViewerLogin, error, pend
     </section>
 
     <footer className="landing-footer">
-      <p><strong>Important:</strong> this is an unofficial student side project. It is not operated by, endorsed by, or a substitute for the {INSTITUTE.name} Placement Office.</p>
-      <span>Use the information responsibly and report genuine discrepancies to yash25091@iiitd.ac.in.</span>
+      <SiteDisclaimer variant="footer" />
     </footer>
     </main>
-  );
-};
+);
 
 export { LoginScreen };

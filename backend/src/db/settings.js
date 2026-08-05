@@ -8,6 +8,11 @@ export const getAppSettings = async (keys) => {
   return Object.fromEntries(rows.map((row) => [row.key, row.value]));
 };
 
+export const deleteAppSettings = async (keys) => {
+  if (!keys.length) return;
+  await query('DELETE FROM app_settings WHERE key = ANY($1::text[])', [keys]);
+};
+
 export const setAppSettings = async (settings) => {
   const entries = Object.entries(settings);
   if (!entries.length) return;

@@ -146,7 +146,7 @@ const RatingsIntro = ({
 
       {!canRate && (
         <div className="rating-eligibility-note">
-          Shared viewer access can see averages but cannot submit ratings. Sign out and use your IIIT Delhi Google account so attribution can be audited.
+          This session can see averages but cannot submit ratings. Sign out and sign in again with your IIIT Delhi Google account so attribution can be audited.
         </div>
       )}
 
