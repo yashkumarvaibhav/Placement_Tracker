@@ -41,6 +41,13 @@ npm run dev             # http://localhost:5173/
 ## Viewer access
 - Google sign-in is verified by the backend against `GOOGLE_CLIENT_ID` and the `iiitd.ac.in` hosted domain. It is the only way to sign in.
 - The shared viewer username and password login was removed. `POST /api/auth/viewer` now answers `410`, sessions minted by it are rejected, and the stored credentials are deleted from `app_settings` on startup.
+- Who gets in, in order (`backend/src/access.js`):
+  1. `ADMIN_EMAIL` signs in as admin.
+  2. The Placement Cell whitelist in `ACCESS_WHITELIST` — checked before the domain rule, so the one partner address outside `iiitd.ac.in` still works.
+  3. Students sitting in the current placement cycle (`PLACEMENT_ROSTER_YEAR`, currently 2027, excluding `Not Sitting` and `Ineligible`). A roster address matches either the derived `<first name><last 5 digits of roll>@iiitd.ac.in` pattern or the imported address in `student_rating_identities`, because some roster rows list a surname first.
+  4. Any other `iiitd.ac.in` address with an `approved` row in `access_requests`.
+- Everything else on the institute domain is queued as `pending` in `access_requests` and sees no data until an admin approves it at `/#/admin/access`. Addresses outside the institute domain are refused outright and are never queued.
+- Grants are re-checked on every data request (cached for 60s) so approving or revoking someone takes effect immediately rather than when their 12-hour session expires.
 - Google email addresses are used for domain verification and a private roster-to-account
   mapping supports self-rating. A submitted rating keeps its email attribution for audit,
   visible only in the admin-only Ratings analytics screen; viewer-facing APIs expose only

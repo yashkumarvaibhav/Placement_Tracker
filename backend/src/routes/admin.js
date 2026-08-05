@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { authMiddleware } from '../auth.js';
+import { authMiddleware, getRatingEmail } from '../auth.js';
+import { invalidateGrant } from '../access.js';
 import { requireDbReady } from '../ready.js';
 import { PLACEMENT_ATLAS_HOST } from '../config.js';
 import {
@@ -9,8 +10,9 @@ import {
   getPlacementCalendarSnapshot,
   getPreviousPlacementCalendarSnapshotId,
   getTableCounts,
+  listAccessRequests,
   listPlacementCalendarSnapshots,
-  setAppSettings,
+  setAccessRequestStatus,
 } from '../db.js';
 import {
   createCalendarOAuthUrl,
@@ -32,6 +34,33 @@ router.get('/health', authMiddleware, async (_req, res) => {
     res.json({ status: 'ok', db: { host: process.env.PGHOST, database: process.env.PGDATABASE }, counts });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+router.get('/access-requests', authMiddleware, requireDbReady, async (_req, res, next) => {
+  try {
+    return res.json(await listAccessRequests());
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// Approve or deny a queued institute account. Both decisions drop the cached grant so the next
+// request from that person is judged on the new status instead of waiting out their session.
+router.put('/access-requests/:id', authMiddleware, requireDbReady, async (req, res, next) => {
+  const status = String(req.body?.status || '').trim().toLowerCase();
+  if (!['approved', 'denied', 'pending'].includes(status)) {
+    return res.status(400).json({ message: 'Status must be approved, denied, or pending.' });
+  }
+
+  try {
+    const updated = await setAccessRequestStatus(req.params.id, status, getRatingEmail(req));
+    if (!updated) return res.status(404).json({ message: 'Access request not found.' });
+
+    invalidateGrant(updated.email);
+    return res.json(updated);
+  } catch (err) {
+    return next(err);
   }
 });
 

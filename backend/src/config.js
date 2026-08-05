@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+export const INSTITUTE_DOMAIN = 'iiitd.ac.in';
 export const ADMIN_EMAIL = 'yash25091@iiitd.ac.in';
 export const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '183667160330-4jtc41mg2jf7ugk6211smgcrr7lcfo02.apps.googleusercontent.com';
 export const PLACEMENT_ATLAS_HOST = process.env.PLACEMENT_ATLAS_HOST || 'placement-atlas.yashkumarvaibhav.me';

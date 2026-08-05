@@ -7,3 +7,4 @@ export * from './db/companies.js';
 export * from './db/students.js';
 export * from './db/stats.js';
 export * from './db/ratings.js';
+export * from './db/access.js';

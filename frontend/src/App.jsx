@@ -29,6 +29,7 @@ import { CompanyForm } from './components/CompanyForm';
 import { StudentForm } from './components/StudentForm';
 import { LoginScreen } from './components/LoginScreen';
 import { SiteFooter } from './components/SiteDisclaimer';
+import { AccessRequests } from './components/AccessRequests';
 import {
   RatingsAnalytics,
   RatingsIntro,
@@ -252,6 +253,7 @@ const App = () => {
   const [loadedBatchKey, setLoadedBatchKey] = useState(initialSnapshot ? activeBatchKey : null);
   const [error, setError] = useState('');
   const [loginError, setLoginError] = useState('');
+  const [loginNotice, setLoginNotice] = useState(null);
   const [authPending, setAuthPending] = useState(false);
   const [sessionChecking, setSessionChecking] = useState(() => !!viewerToken);
   const refreshRequestId = useRef(0);
@@ -263,6 +265,7 @@ const App = () => {
   const handleGoogleSuccess = async (credentialResponse) => {
     setAuthPending(true);
     setLoginError('');
+    setLoginNotice(null);
 
     try {
       const response = await api.post('/auth/google', { credential: credentialResponse?.credential });
@@ -275,7 +278,13 @@ const App = () => {
       }
     } catch (err) {
       googleLogout();
-      setLoginError(err.response?.data?.message || 'Google sign-in could not be verified.');
+      const { code, message } = err.response?.data || {};
+      // A queued or declined request is a state to explain, not a failure to retry.
+      if (code === 'ACCESS_PENDING' || code === 'ACCESS_DENIED') {
+        setLoginNotice({ code, message });
+      } else {
+        setLoginError(message || 'Google sign-in could not be verified.');
+      }
     } finally {
       setAuthPending(false);
     }
@@ -506,10 +515,14 @@ const App = () => {
         const introKey = `${RATINGS_INTRO_VERSION}:${response.data.ratings_account_id || 'viewer'}`;
         if (!localStorage.getItem(introKey)) setShowRatingsIntro(true);
       })
-      .catch(() => {
+      .catch((err) => {
         if (!active) return;
         handleGoogleLogout();
-        setLoginError('Your viewer session expired. Please sign in again.');
+        if (err.response?.data?.code === 'ACCESS_REVOKED') {
+          setLoginNotice({ code: 'ACCESS_DENIED', message: err.response.data.message });
+        } else {
+          setLoginError('Your viewer session expired. Please sign in again.');
+        }
       })
       .finally(() => {
         if (active) setSessionChecking(false);
@@ -1495,6 +1508,7 @@ const App = () => {
         onSuccess={handleGoogleSuccess}
         onError={handleGoogleError}
         error={loginError}
+        notice={loginNotice}
         pending={authPending}
         themeMode={themeMode}
         onToggleTheme={toggleThemeMode}
@@ -1578,6 +1592,7 @@ const App = () => {
               )}
               <button className="secondary nav-signout" title="End viewer session" onClick={() => { closeMobileNav(); handleGoogleLogout(); }}>Sign out</button>
               {isAdmin && <Link className="nav-admin-link" to="/admin/calendar" onClick={closeMobileNav}>Calendar</Link>}
+              {isAdmin && <Link className="nav-admin-link" to="/admin/access" onClick={closeMobileNav}>Access</Link>}
             </div>
           </div>
         </div>
@@ -2626,7 +2641,11 @@ const App = () => {
           )}
         />
 
-        <Route path="/admin" element={<Navigate to="/admin/calendar" replace />} />
+        <Route path="/admin" element={<Navigate to="/admin/access" replace />} />
+        <Route
+          path="/admin/access"
+          element={adminRoute(<AccessRequests authHeaders={authHeaders} />)}
+        />
         <Route
           path="/admin/calendar"
           element={adminRoute(

@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { hasActiveGrant } from './access.js';
 import {
   ADMIN_EMAIL,
   ADMIN_SESSION_TTL_MS,
@@ -118,10 +119,26 @@ export const ratingAccountId = (req) => {
   return crypto.createHmac('sha256', SESSION_SECRET).update(`ratings:${identity}`).digest('base64url').slice(0, 18);
 };
 
-export const requireViewerAuth = (req, res, next) => {
+// Viewer access is revocable, so every request re-checks that the signed-in address still has a
+// grant instead of trusting the token for its full lifetime. `hasActiveGrant` caches, and an
+// admin decision clears that cache, so an approval or a denial takes effect right away.
+export const requireViewerAuth = async (req, res, next) => {
   const token = bearerToken(req);
-  if (isValidAdminSession(token) || isValidViewerSession(token)) return next();
-  return res.status(401).json({ message: 'A verified IIIT Delhi sign-in is required.' });
+  if (isValidAdminSession(token)) return next();
+  if (!isValidViewerSession(token)) {
+    return res.status(401).json({ message: 'A verified IIIT Delhi sign-in is required.' });
+  }
+
+  try {
+    const session = readSignedSession(token);
+    if (await hasActiveGrant(session?.email)) return next();
+    return res.status(403).json({
+      code: 'ACCESS_REVOKED',
+      message: 'Your access to Placement Atlas is no longer approved. Please contact the admin.',
+    });
+  } catch (err) {
+    return next(err);
+  }
 };
 
 export const requireRatingAuth = (req, res, next) => {

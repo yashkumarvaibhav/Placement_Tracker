@@ -4,7 +4,7 @@ import { ThemeToggle } from './ui';
 import { SiteDisclaimer } from './SiteDisclaimer';
 import { DASHBOARD_TITLE, INSTITUTE, PRODUCT_NAME } from '../institute';
 
-const LoginScreen = ({ assetBase, onSuccess, onError, error, pending, themeMode, onToggleTheme }) => (
+const LoginScreen = ({ assetBase, onSuccess, onError, error, notice, pending, themeMode, onToggleTheme }) => (
     <main className="landing-page">
     <nav className="landing-nav">
       <a className="landing-brand" href="#top" aria-label={`${PRODUCT_NAME} home`}>
@@ -37,6 +37,12 @@ const LoginScreen = ({ assetBase, onSuccess, onError, error, pending, themeMode,
           <h2 id="access-heading">Continue with IIITD Google</h2>
           <p>Use your <strong>@{INSTITUTE.domain}</strong> account to view the placement data.</p>
           {error && <div className="error-text access-error" role="alert">{error}</div>}
+          {notice && (
+            <div className="access-notice" role="status">
+              <strong>{notice.code === 'ACCESS_DENIED' ? 'Access not granted' : 'Waiting for admin approval'}</strong>
+              <span>{notice.message}</span>
+            </div>
+          )}
           <div className={pending ? 'google-login-wrap is-pending' : 'google-login-wrap'}>
             <GoogleLogin
               onSuccess={onSuccess}

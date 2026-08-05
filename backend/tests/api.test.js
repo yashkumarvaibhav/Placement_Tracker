@@ -4,8 +4,23 @@ import request from 'supertest';
 
 // The API tests exercise routing, auth gates, and request validation with the data layer
 // stubbed out — no database is touched.
+// Google verification is stubbed: the "credential" is just a JSON payload the test controls.
+vi.mock('google-auth-library', () => ({
+  OAuth2Client: class {
+    async verifyIdToken({ idToken }) {
+      const payload = JSON.parse(idToken);
+      return { getPayload: () => payload };
+    }
+  },
+}));
+
 vi.mock('../src/db.js', () => ({
   countCompanyReferences: vi.fn(async () => ({ offers: 0, students: 0 })),
+  findPlacementRosterStudent: vi.fn(async () => null),
+  getAccessRequest: vi.fn(async () => null),
+  recordAccessRequest: vi.fn(async ({ email, name }) => ({ id: 1, email, name, status: 'pending' })),
+  listAccessRequests: vi.fn(async () => []),
+  setAccessRequestStatus: vi.fn(async (id, status) => ({ id, email: 'someone@iiitd.ac.in', status })),
   createCompany: vi.fn(async (payload) => ({ id: 1, ...payload })),
   createPlacementCalendarSnapshot: vi.fn(),
   createStudent: vi.fn(async (payload) => ({ id: 1, ...payload })),
@@ -53,7 +68,19 @@ const { default: app } = await import('../src/app.js');
 const { createAdminSession, createViewerSession } = await import('../src/auth.js');
 const { setDbReady } = await import('../src/ready.js');
 const { SESSION_SECRET } = await import('../src/config.js');
+const { invalidateGrant } = await import('../src/access.js');
 const db = await import('../src/db.js');
+
+// The signing key is a real Google account on the 2027 roster unless a test says otherwise.
+const googleCredential = (payload) => JSON.stringify({
+  email_verified: true,
+  hd: 'iiitd.ac.in',
+  ...payload,
+});
+const signInWith = (payload, ip = '198.51.100.1') => request(app)
+  .post('/api/auth/google')
+  .set('X-Forwarded-For', ip)
+  .send({ credential: googleCredential(payload) });
 
 const asViewer = () => `Bearer ${createViewerSession('viewer25001@iiitd.ac.in')}`;
 const asAdmin = () => `Bearer ${createAdminSession()}`;
@@ -72,7 +99,10 @@ const asRetiredSharedViewer = () => {
 
 beforeEach(() => {
   setDbReady(true);
+  invalidateGrant();
   vi.clearAllMocks();
+  // Signed-in viewers in the existing tests are placement-roster students.
+  db.findPlacementRosterStudent.mockResolvedValue({ id: 5, name: 'Viewer', roll_number: '2023001' });
 });
 
 describe('login wall on data routes', () => {
@@ -304,6 +334,134 @@ describe('operational endpoints', () => {
 
   it('unknown API routes return JSON 404', async () => {
     const res = await request(app).get('/api/definitely-not-a-route');
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('who is allowed to sign in', () => {
+  it('turns away non-institute accounts without queueing a request', async () => {
+    const res = await signInWith({ email: 'someone@gmail.com', hd: undefined });
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('DOMAIN_NOT_ALLOWED');
+    expect(db.recordAccessRequest).not.toHaveBeenCalled();
+  });
+
+  it('turns away an institute address whose Google account is unverified', async () => {
+    const res = await signInWith({ email: 'someone@iiitd.ac.in', email_verified: false });
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('DOMAIN_NOT_ALLOWED');
+  });
+
+  it('lets a whitelisted partner account in from outside the institute domain', async () => {
+    db.findPlacementRosterStudent.mockResolvedValue(null);
+    const res = await signInWith({ email: 'dharnish@knowledgechakra.com', hd: undefined });
+    expect(res.status).toBe(200);
+    expect(res.body.is_admin).toBe(false);
+    expect(res.body.token).toBeTruthy();
+  });
+
+  it('lets a whitelisted Placement Cell account in', async () => {
+    db.findPlacementRosterStudent.mockResolvedValue(null);
+    const res = await signInWith({ email: 'admin-placement@iiitd.ac.in' });
+    expect(res.status).toBe(200);
+    expect(db.findPlacementRosterStudent).not.toHaveBeenCalled();
+  });
+
+  it('auto-approves a student sitting in the placement process', async () => {
+    const res = await signInWith({ email: 'sanjeet23482@iiitd.ac.in' });
+    expect(res.status).toBe(200);
+    expect(db.recordAccessRequest).not.toHaveBeenCalled();
+  });
+
+  it('queues any other institute address for admin approval', async () => {
+    db.findPlacementRosterStudent.mockResolvedValue(null);
+    const res = await signInWith({ email: 'alumni20123@iiitd.ac.in', name: 'Alum' });
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('ACCESS_PENDING');
+    expect(db.recordAccessRequest).toHaveBeenCalledWith({ email: 'alumni20123@iiitd.ac.in', name: 'Alum' });
+  });
+
+  it('lets an approved request through', async () => {
+    db.findPlacementRosterStudent.mockResolvedValue(null);
+    db.getAccessRequest.mockResolvedValue({ id: 3, email: 'faculty@iiitd.ac.in', status: 'approved' });
+    const res = await signInWith({ email: 'faculty@iiitd.ac.in' });
+    expect(res.status).toBe(200);
+    expect(res.body.token).toBeTruthy();
+  });
+
+  it('keeps a denied request out and says so', async () => {
+    db.findPlacementRosterStudent.mockResolvedValue(null);
+    db.getAccessRequest.mockResolvedValue({ id: 3, email: 'nope@iiitd.ac.in', status: 'denied' });
+    db.recordAccessRequest.mockResolvedValue({ id: 3, email: 'nope@iiitd.ac.in', status: 'denied' });
+    const res = await signInWith({ email: 'nope@iiitd.ac.in' });
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('ACCESS_DENIED');
+  });
+
+  it('signs the admin in as an admin', async () => {
+    const res = await signInWith({ email: 'yash25091@iiitd.ac.in' });
+    expect(res.status).toBe(200);
+    expect(res.body.is_admin).toBe(true);
+  });
+});
+
+describe('access stays revocable after sign-in', () => {
+  it('stops serving data once the grant is gone', async () => {
+    db.findPlacementRosterStudent.mockResolvedValue(null);
+    db.getAccessRequest.mockResolvedValue({ status: 'denied' });
+    const res = await request(app)
+      .get('/api/companies?cycle=2027')
+      .set('Authorization', asViewer());
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('ACCESS_REVOKED');
+  });
+
+  it('keeps the admin session working without a roster lookup', async () => {
+    db.findPlacementRosterStudent.mockResolvedValue(null);
+    const res = await request(app).get('/api/companies?cycle=2027').set('Authorization', asAdmin());
+    expect(res.status).toBe(200);
+  });
+});
+
+describe('access request queue', () => {
+  it('is admin-only', async () => {
+    expect((await request(app).get('/api/admin/access-requests')).status).toBe(401);
+    expect((await request(app).get('/api/admin/access-requests').set('Authorization', asViewer())).status).toBe(401);
+  });
+
+  it('lists requests for an admin', async () => {
+    db.listAccessRequests.mockResolvedValue([{ id: 1, email: 'a@iiitd.ac.in', status: 'pending' }]);
+    const res = await request(app).get('/api/admin/access-requests').set('Authorization', asAdmin());
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+  });
+
+  it('rejects a status it does not recognise', async () => {
+    const res = await request(app)
+      .put('/api/admin/access-requests/1')
+      .set('Authorization', asAdmin())
+      .send({ status: 'maybe' });
+    expect(res.status).toBe(400);
+    expect(db.setAccessRequestStatus).not.toHaveBeenCalled();
+  });
+
+  it('approves a request and records who decided it', async () => {
+    db.setAccessRequestStatus.mockResolvedValue({ id: 1, email: 'a@iiitd.ac.in', status: 'approved' });
+    const res = await request(app)
+      .put('/api/admin/access-requests/1')
+      .set('Authorization', asAdmin())
+      .send({ status: 'approved' });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('approved');
+    expect(db.setAccessRequestStatus).toHaveBeenCalledWith('1', 'approved', 'yash25091@iiitd.ac.in');
+  });
+
+  it('404s an unknown request', async () => {
+    db.setAccessRequestStatus.mockResolvedValue(null);
+    const res = await request(app)
+      .put('/api/admin/access-requests/999')
+      .set('Authorization', asAdmin())
+      .send({ status: 'denied' });
     expect(res.status).toBe(404);
   });
 });

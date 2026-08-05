@@ -62,6 +62,20 @@ export const initDb = async () => {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );`);
 
+  // Sign-in queue for institute accounts that are not on the current placement roster: they
+  // land here as 'pending' and only see data once an admin approves the row.
+  await query(`CREATE TABLE IF NOT EXISTS access_requests (
+      id BIGSERIAL PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      name TEXT,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','denied')),
+      requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      attempts INTEGER NOT NULL DEFAULT 1,
+      decided_at TIMESTAMPTZ,
+      decided_by TEXT
+    );`);
+
   await query(`CREATE TABLE IF NOT EXISTS skill_ratings (
       id BIGSERIAL PRIMARY KEY,
       rater_email TEXT NOT NULL,
