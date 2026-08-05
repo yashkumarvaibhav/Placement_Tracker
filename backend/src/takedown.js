@@ -1,7 +1,7 @@
 import { PLACEMENT_ATLAS_HOST, PORTFOLIO_URL, SITE_TAKEDOWN } from './config.js';
 
 const NOTICE_TITLE = 'This website has been taken down.';
-const NOTICE_BODY = 'Feel free to visit yashkumarvaibhav.me to view my portfolio/website — whatever is suitable for people like me.';
+const NOTICE_BODY = 'Feel free to visit yashkumarvaibhav.me to view my portfolio.';
 
 const isUnder = (path, prefix) => path === prefix || path.startsWith(`${prefix}/`);
 
@@ -76,7 +76,7 @@ const noticePage = () => `<!doctype html>
     <main>
       <div class="rule"></div>
       <h1>${NOTICE_TITLE}</h1>
-      <p>Feel free to visit <a href="${PORTFOLIO_URL}">yashkumarvaibhav.me</a> to view my portfolio/website — whatever is suitable for people like me.</p>
+      <p>Feel free to visit <a href="${PORTFOLIO_URL}">yashkumarvaibhav.me</a> to view my portfolio.</p>
       <p class="fine">Access to Placement Atlas is suspended for all users.</p>
     </main>
   </body>
