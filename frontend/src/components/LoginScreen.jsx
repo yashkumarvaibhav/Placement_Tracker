@@ -44,14 +44,19 @@ const LoginScreen = ({ assetBase, onSuccess, onError, error, notice, pending, th
             </div>
           )}
           <div className={pending ? 'google-login-wrap is-pending' : 'google-login-wrap'}>
+            {/* Every prop below other than useOneTap is spread straight into
+                google.accounts.id.initialize, which ignores keys it does not know. The domain
+                hint is `hosted_domain` there — `hd` is a field on an OAuth token response, not
+                an input, so passing it did nothing and the chooser kept offering whichever
+                account the browser had signed in first. It is only a hint either way; the
+                backend is what actually enforces the domain. */}
             <GoogleLogin
               onSuccess={onSuccess}
               onError={onError}
               useOneTap={false}
               auto_select={false}
-              button_auto_select={false}
               use_fedcm_for_button={false}
-              hd={INSTITUTE.domain}
+              hosted_domain={INSTITUTE.domain}
               ux_mode="popup"
               text="signin_with"
             />
