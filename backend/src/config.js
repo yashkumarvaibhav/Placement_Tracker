@@ -6,7 +6,7 @@ export const INSTITUTE_DOMAIN = 'iiitd.ac.in';
 export const ADMIN_EMAIL = 'yash25091@iiitd.ac.in';
 export const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '183667160330-4jtc41mg2jf7ugk6211smgcrr7lcfo02.apps.googleusercontent.com';
 export const PRODUCT_NAME = 'Kaju Katli';
-export const INSTITUTE_NAME = 'Lauda University';
+export const INSTITUTE_NAME = 'Very Good Institute of Information Technology';
 
 // The hostname the app is served from.
 export const APP_HOST = process.env.APP_HOST || 'kajukatli.yashkumarvaibhav.me';

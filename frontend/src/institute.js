@@ -2,9 +2,9 @@
 // place that decides it, so adding one later means changing this value (or feeding it from the
 // selector) instead of hunting down institute names in the markup.
 export const INSTITUTE = {
-  key: 'lauda',
-  short: 'LU',
-  name: 'Lauda University',
+  key: 'vgiit',
+  short: 'VGIIT',
+  name: 'Very Good Institute of Information Technology',
   // Sign-in domain shown to the reader and passed to Google as the `hd` hint. This is the real
   // domain of the accounts Google verifies, so it does not follow the display name above. The
   // backend keeps its own allow-list, so this must stay in step with it.

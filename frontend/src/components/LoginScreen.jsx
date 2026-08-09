@@ -4,7 +4,7 @@ import { ThemeToggle } from './ui';
 import { SiteDisclaimer } from './SiteDisclaimer';
 import { DASHBOARD_TITLE, INSTITUTE, PRODUCT_NAME } from '../institute';
 
-const LoginScreen = ({ assetBase, onSuccess, onError, error, notice, pending, themeMode, onToggleTheme }) => (
+const LoginScreen = ({ onSuccess, onError, error, notice, pending, themeMode, onToggleTheme }) => (
     <main className="landing-page">
     <nav className="landing-nav">
       <a className="landing-brand" href="#top" aria-label={`${PRODUCT_NAME} home`}>
@@ -29,9 +29,6 @@ const LoginScreen = ({ assetBase, onSuccess, onError, error, notice, pending, th
       </div>
 
       <aside className="access-card" aria-labelledby="access-heading">
-        <div className="access-card-image" style={{ backgroundImage: `url(${assetBase}institute18-3.jpg)` }}>
-          <span>Community access</span>
-        </div>
         <div className="access-card-body">
           <span className="eyebrow">Verified access</span>
           <h2 id="access-heading">Continue with {INSTITUTE.short} Google</h2>

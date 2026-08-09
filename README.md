@@ -63,7 +63,7 @@ npm run dev             # http://localhost:5173/
 - Read access to placement data requires a signed viewer session. Configure a stable `SESSION_SECRET` in `backend/.env`.
 
 ## Admin login
-- `yash25091@iiitd.ac.in` automatically receives admin access after a successful Lauda University Google sign-in.
+- `yash25091@iiitd.ac.in` automatically receives admin access after a successful Very Good Institute of Information Technology Google sign-in.
 - There is no separate admin password or TOTP login endpoint.
 
 ## Placement Calendar

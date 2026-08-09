@@ -53,7 +53,6 @@ import { DASHBOARD_TITLE, INSTITUTE, PRODUCT_NAME } from './institute';
 const PlacementCalendarAdmin = lazy(() => import('./PlacementCalendarAdmin'));
 
 
-const assetBase = import.meta.env.BASE_URL || '/';
 const VIEWER_TOKEN_STORAGE_KEY = 'viewerToken';
 const RATINGS_INTRO_VERSION = 'skill-ratings-v1';
 const ADMIN_VIEW_STORAGE_KEY = 'placementAdminView';
@@ -1504,7 +1503,6 @@ const App = () => {
   if (!isViewerAuthed) {
     return (
       <LoginScreen
-        assetBase={assetBase}
         onSuccess={handleGoogleSuccess}
         onError={handleGoogleError}
         error={loginError}
