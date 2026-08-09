@@ -101,8 +101,9 @@ beforeEach(() => {
   setDbReady(true);
   invalidateGrant();
   vi.clearAllMocks();
-  // Signed-in viewers in the existing tests are placement-roster students.
-  db.findPlacementRosterStudent.mockResolvedValue({ id: 5, name: 'Viewer', roll_number: '2023001' });
+  // Sitting on the roster is no longer a grant, so signed-in viewers in the existing tests
+  // are addresses an admin approved.
+  db.getAccessRequest.mockResolvedValue({ id: 5, email: 'viewer25001@iiitd.ac.in', status: 'approved' });
 });
 
 describe('login wall on data routes', () => {
@@ -353,7 +354,7 @@ describe('who is allowed to sign in', () => {
   });
 
   it('lets the whitelisted account in without consulting the roster', async () => {
-    db.findPlacementRosterStudent.mockResolvedValue(null);
+    db.getAccessRequest.mockResolvedValue(null);
     const res = await signInWith({ email: 'vaibhav25006@iiitd.ac.in' });
     expect(res.status).toBe(200);
     expect(res.body.is_admin).toBe(false);
@@ -362,27 +363,29 @@ describe('who is allowed to sign in', () => {
   });
 
   it('no longer admits the partner account that used to be whitelisted', async () => {
-    db.findPlacementRosterStudent.mockResolvedValue(null);
+    db.getAccessRequest.mockResolvedValue(null);
     const res = await signInWith({ email: 'dharnish@knowledgechakra.com', hd: undefined });
     expect(res.status).toBe(403);
     expect(res.body.code).toBe('DOMAIN_NOT_ALLOWED');
   });
 
   it('no longer admits a Placement Cell address on sight', async () => {
-    db.findPlacementRosterStudent.mockResolvedValue(null);
+    db.getAccessRequest.mockResolvedValue(null);
     const res = await signInWith({ email: 'admin-placement@iiitd.ac.in' });
     expect(res.status).toBe(403);
     expect(res.body.code).toBe('ACCESS_PENDING');
   });
 
-  it('auto-approves a student sitting in the placement process', async () => {
+  it('no longer auto-approves a student sitting in the placement process', async () => {
+    db.getAccessRequest.mockResolvedValue(null);
     const res = await signInWith({ email: 'sanjeet23482@iiitd.ac.in' });
-    expect(res.status).toBe(200);
-    expect(db.recordAccessRequest).not.toHaveBeenCalled();
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('ACCESS_PENDING');
+    expect(db.findPlacementRosterStudent).not.toHaveBeenCalled();
   });
 
   it('queues any other institute address for admin approval', async () => {
-    db.findPlacementRosterStudent.mockResolvedValue(null);
+    db.getAccessRequest.mockResolvedValue(null);
     const res = await signInWith({ email: 'alumni20123@iiitd.ac.in', name: 'Alum' });
     expect(res.status).toBe(403);
     expect(res.body.code).toBe('ACCESS_PENDING');
@@ -390,7 +393,6 @@ describe('who is allowed to sign in', () => {
   });
 
   it('lets an approved request through', async () => {
-    db.findPlacementRosterStudent.mockResolvedValue(null);
     db.getAccessRequest.mockResolvedValue({ id: 3, email: 'faculty@iiitd.ac.in', status: 'approved' });
     const res = await signInWith({ email: 'faculty@iiitd.ac.in' });
     expect(res.status).toBe(200);
@@ -398,7 +400,6 @@ describe('who is allowed to sign in', () => {
   });
 
   it('keeps a denied request out and says so', async () => {
-    db.findPlacementRosterStudent.mockResolvedValue(null);
     db.getAccessRequest.mockResolvedValue({ id: 3, email: 'nope@iiitd.ac.in', status: 'denied' });
     db.recordAccessRequest.mockResolvedValue({ id: 3, email: 'nope@iiitd.ac.in', status: 'denied' });
     const res = await signInWith({ email: 'nope@iiitd.ac.in' });
@@ -415,7 +416,7 @@ describe('who is allowed to sign in', () => {
 
 describe('access stays revocable after sign-in', () => {
   it('stops serving data once the grant is gone', async () => {
-    db.findPlacementRosterStudent.mockResolvedValue(null);
+    db.getAccessRequest.mockResolvedValue(null);
     db.getAccessRequest.mockResolvedValue({ status: 'denied' });
     const res = await request(app)
       .get('/api/companies?cycle=2027')
@@ -425,7 +426,7 @@ describe('access stays revocable after sign-in', () => {
   });
 
   it('keeps the admin session working without a roster lookup', async () => {
-    db.findPlacementRosterStudent.mockResolvedValue(null);
+    db.getAccessRequest.mockResolvedValue(null);
     const res = await request(app).get('/api/companies?cycle=2027').set('Authorization', asAdmin());
     expect(res.status).toBe(200);
   });

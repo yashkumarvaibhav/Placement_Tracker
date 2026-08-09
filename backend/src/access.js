@@ -1,5 +1,5 @@
 import { ADMIN_EMAIL, INSTITUTE_DOMAIN } from './config.js';
-import { findPlacementRosterStudent, getAccessRequest } from './db.js';
+import { getAccessRequest } from './db.js';
 
 // Addresses that always get in, checked before the domain rule so a non-institute address on
 // this list would still work. Nothing else outside the institute domain is ever accepted.
@@ -14,14 +14,17 @@ export const normalizeEmail = (email) => String(email || '').trim().toLowerCase(
 export const isInstituteEmail = (email) => normalizeEmail(email).endsWith(`@${INSTITUTE_DOMAIN}`);
 
 // Why this address may see data, or null if it may not. Order matters: admin, then the standing
-// whitelist, then the current placement roster, then an admin-approved request.
+// whitelist, then an admin-approved request.
+//
+// Sitting on the placement roster used to be a grant of its own, which auto-approved the whole
+// current cycle on first sign-in. That is gone: since the move, being a student is no longer a
+// reason to get in on sight, so roster addresses queue for approval like everyone else.
 export const grantFor = async (email) => {
   const address = normalizeEmail(email);
   if (!address) return null;
   if (address === ADMIN_EMAIL) return 'admin';
   if (ACCESS_WHITELIST.has(address)) return 'whitelist';
   if (!isInstituteEmail(address)) return null;
-  if (await findPlacementRosterStudent(address)) return 'roster';
 
   const request = await getAccessRequest(address);
   return request?.status === 'approved' ? 'approved' : null;
