@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
+import { INSTITUTE } from '../institute';
 
 const STATUS_TABS = [
   { key: 'pending', label: 'Pending' },
@@ -73,7 +74,7 @@ const AccessRequests = ({ authHeaders }) => {
         <h2>Access requests</h2>
         <p className="subtext">
           Students sitting in the 2027 placement process and the Placement Cell accounts sign in
-          automatically. Every other IIIT Delhi address lands here and sees nothing until you
+          automatically. Every other {INSTITUTE.name} address lands here and sees nothing until you
           approve it. Denying an approved account cuts its access off immediately.
         </p>
 

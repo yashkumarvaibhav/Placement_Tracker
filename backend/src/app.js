@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
-import { PLACEMENT_ATLAS_HOST, SITE_TAKEDOWN, frontendDistPath, portfolioDistPath } from './config.js';
+import { APP_HOST, SITE_TAKEDOWN, frontendDistPath, portfolioDistPath } from './config.js';
 import takedownGate from './takedown.js';
 import authRoutes from './routes/auth.js';
 import adminRoutes from './routes/admin.js';
@@ -15,7 +15,7 @@ const app = express();
 
 app.use(cors({
   origin: [
-    `https://${PLACEMENT_ATLAS_HOST}`,
+    `https://${APP_HOST}`,
     'https://yashkumarvaibhav.me',
     'http://localhost:5173',
   ],
@@ -63,15 +63,11 @@ app.use('/api', (err, _req, res, _next) => {
   return res.status(500).json({ message: 'Unexpected server error.' });
 });
 
-app.use('/Placement_Tracker', (req, res) => {
-  const suffix = req.originalUrl.replace(/^\/Placement_Tracker\/?/, '/');
-  res.redirect(308, `https://${PLACEMENT_ATLAS_HOST}${suffix}`);
-});
-
-// The placement-atlas hostname serves the tracker SPA; any other hostname falls through to
-// the portfolio site below.
+// The app hostname serves the SPA; any other hostname falls through to the portfolio site
+// below. The retired hostname never reaches here — the takedown gate answers it first, and the
+// old /Placement_Tracker redirect is gone with it rather than forwarding anyone to the app.
 app.use((req, res, next) => {
-  if (req.hostname !== PLACEMENT_ATLAS_HOST) return next();
+  if (req.hostname !== APP_HOST) return next();
 
   return express.static(frontendDistPath)(req, res, (err) => {
     if (err) return next(err);

@@ -3,7 +3,7 @@
 The core system originated in the **GWiz** app and now also covers the personal portfolio at
 `yashkumarvaibhav.me`. It has two coordinated presentation layers:
 
-1. **Editorial core** — flat white surfaces, IIITD teal, ink-grey text, hairline borders,
+1. **Editorial core** — flat white surfaces, Lauda teal, ink-grey text, hairline borders,
    Newsreader headings, and Arial UI.
 2. **Cosmic hero** — a dark, animated first-screen environment used only for high-impact
    personal storytelling. It retains the same typography and teal identity.
@@ -20,7 +20,7 @@ exception, not a replacement for the base system.
 ### Brand / Accent
 | Token | Value | Use |
 |---|---|---|
-| `--accent` (IIITD Teal) | `#3fada8` | Primary accent: buttons, active states, links |
+| `--accent` (Lauda Teal) | `#3fada8` | Primary accent: buttons, active states, links |
 | `--accent-hover` | `#359a95` | Hover/pressed accent |
 | `--accent-soft` | `rgba(63, 173, 168, 0.12)` | Tinted fills, selected rows, chips |
 | `--accent-contrast` | `#ffffff` | Text/icons on an accent fill |
@@ -199,7 +199,7 @@ Rules:
 ```css
 :root {
   /* Brand */
-  --accent: #3fada8;          /* IIITD teal */
+  --accent: #3fada8;          /* Lauda teal */
   --accent-hover: #359a95;
   --accent-soft: rgba(63, 173, 168, 0.12);
   --accent-contrast: #ffffff;

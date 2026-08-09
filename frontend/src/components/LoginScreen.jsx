@@ -34,7 +34,7 @@ const LoginScreen = ({ assetBase, onSuccess, onError, error, notice, pending, th
         </div>
         <div className="access-card-body">
           <span className="eyebrow">Verified access</span>
-          <h2 id="access-heading">Continue with IIITD Google</h2>
+          <h2 id="access-heading">Continue with {INSTITUTE.short} Google</h2>
           <p>Use your <strong>@{INSTITUTE.domain}</strong> account to view the placement data.</p>
           {error && <div className="error-text access-error" role="alert">{error}</div>}
           {notice && (

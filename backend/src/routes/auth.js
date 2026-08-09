@@ -22,6 +22,7 @@ import {
   ADMIN_SESSION_TTL_MS,
   GOOGLE_CLIENT_ID,
   INSTITUTE_DOMAIN,
+  INSTITUTE_NAME,
   VIEWER_SESSION_TTL_MS,
 } from '../config.js';
 
@@ -55,7 +56,7 @@ router.post('/google', authRateLimiter, requireDbReady, async (req, res, next) =
     if (!verified || (!onInstituteDomain && !ACCESS_WHITELIST.has(email))) {
       return res.status(403).json({
         code: 'DOMAIN_NOT_ALLOWED',
-        message: 'Please use a verified IIIT Delhi Google account.',
+        message: `Please use a verified ${INSTITUTE_NAME} Google account.`,
       });
     }
 
@@ -83,7 +84,7 @@ router.post('/google', authRateLimiter, requireDbReady, async (req, res, next) =
 
 // The shared viewer username/password sign-in was removed: Google is the only way in.
 router.post('/viewer', authRateLimiter, (_req, res) => res.status(410).json({
-  message: 'Viewer username and password sign-in has been removed. Please continue with your IIIT Delhi Google account.',
+  message: `Viewer username and password sign-in has been removed. Please continue with your ${INSTITUTE_NAME} Google account.`,
 }));
 
 router.get('/session', requireViewerAuth, async (req, res, next) => {

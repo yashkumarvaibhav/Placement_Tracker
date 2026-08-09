@@ -1,19 +1,12 @@
 import { ADMIN_EMAIL, INSTITUTE_DOMAIN } from './config.js';
 import { findPlacementRosterStudent, getAccessRequest } from './db.js';
 
-// Placement Cell and partner addresses that always get in, checked before the domain rule so a
-// non-institute address on this list still works. Nothing else outside the institute domain is
-// ever accepted.
+// Addresses that always get in, checked before the domain rule so a non-institute address on
+// this list would still work. Nothing else outside the institute domain is ever accepted.
+// The Placement Cell and partner addresses that used to sit here were removed when the site
+// moved hosts; the admin in ADMIN_EMAIL is granted separately and is not listed here.
 export const ACCESS_WHITELIST = new Set([
-  'support-placement@iiitd.ac.in',
-  'admin-placement@iiitd.ac.in',
-  'admin-placement1@iiitd.ac.in',
-  'placement@iiitd.ac.in',
-  'placement-consultant@iiitd.ac.in',
-  'hcs-placement@iiitd.ac.in',
-  'scp@iiitd.ac.in',
-  'rashmil@iiitd.ac.in',
-  'dharnish@knowledgechakra.com',
+  'vaibhav25006@iiitd.ac.in',
 ]);
 
 export const normalizeEmail = (email) => String(email || '').trim().toLowerCase();

@@ -8,6 +8,7 @@ import {
   setAppSettings,
 } from './db.js';
 import { sendPlacementCalendarChangeNotifications } from './calendar-notifications.js';
+import { APP_HOST } from './config.js';
 
 const ADMIN_EMAIL = 'yash25091@iiitd.ac.in';
 const OAUTH_SCOPES = [
@@ -25,7 +26,8 @@ const DEFAULT_SPREADSHEET_ID = '1FqgXNGWUUa5uHRYEHEZ7iYz3ZpOpah7TnGIBGLhyoRU';
 const DEFAULT_SHEET_ID = 0;
 const DEFAULT_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 
-const configuredHost = process.env.PLACEMENT_ATLAS_HOST || 'placement-atlas.yashkumarvaibhav.me';
+// OAuth has to come back to the live host, not the retired one.
+const configuredHost = APP_HOST;
 const spreadsheetId = process.env.PLACEMENT_CALENDAR_SPREADSHEET_ID || DEFAULT_SPREADSHEET_ID;
 const preferredSheetId = Number(process.env.PLACEMENT_CALENDAR_SHEET_ID ?? DEFAULT_SHEET_ID);
 

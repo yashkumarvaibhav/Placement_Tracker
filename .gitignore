@@ -2,6 +2,7 @@ node_modules
 *.log
 backend/data.sqlite
 backend/.env
+backend/.env.bak.*
 frontend/dist
 *.sqlite
 !backend/seed.sqlite

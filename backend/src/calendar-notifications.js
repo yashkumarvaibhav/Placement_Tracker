@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { PRODUCT_NAME } from './config.js';
 
 const DEFAULT_ADMIN_EMAIL = 'yash25091@iiitd.ac.in';
 
@@ -117,7 +118,7 @@ const buildNotificationContent = ({ snapshot, diff }) => {
     listRows('Changed rows', diff?.rows?.changed || [], changedRowPreview),
     listRows('Visibility changes', diff?.rows?.hidden_changed || [], changedRowPreview),
     '',
-    'Open Placement Atlas -> Calendar to inspect the preserved sheet and cell history.',
+    `Open ${PRODUCT_NAME} -> Calendar to inspect the preserved sheet and cell history.`,
   ].filter(Boolean).join('\n');
   const shortText = [
     `Placement Calendar v${snapshot.version} captured`,
@@ -144,7 +145,7 @@ const buildNotificationContent = ({ snapshot, diff }) => {
       ${listRowsHtml('Removed rows', diff?.rows?.removed || [])}
       ${listRowsHtml('Changed rows', diff?.rows?.changed || [], changedRowPreview)}
       ${listRowsHtml('Visibility changes', diff?.rows?.hidden_changed || [], changedRowPreview)}
-      <p>Open Placement Atlas -> Calendar to inspect the preserved sheet and cell history.</p>
+      <p>Open ${PRODUCT_NAME} -> Calendar to inspect the preserved sheet and cell history.</p>
     </div>
   `;
 

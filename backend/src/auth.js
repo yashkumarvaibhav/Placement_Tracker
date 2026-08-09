@@ -3,6 +3,8 @@ import { hasActiveGrant } from './access.js';
 import {
   ADMIN_EMAIL,
   ADMIN_SESSION_TTL_MS,
+  INSTITUTE_NAME,
+  PRODUCT_NAME,
   SESSION_SECRET,
   VIEWER_SESSION_TTL_MS,
 } from './config.js';
@@ -126,7 +128,7 @@ export const requireViewerAuth = async (req, res, next) => {
   const token = bearerToken(req);
   if (isValidAdminSession(token)) return next();
   if (!isValidViewerSession(token)) {
-    return res.status(401).json({ message: 'A verified IIIT Delhi sign-in is required.' });
+    return res.status(401).json({ message: `A verified ${INSTITUTE_NAME} sign-in is required.` });
   }
 
   try {
@@ -134,7 +136,7 @@ export const requireViewerAuth = async (req, res, next) => {
     if (await hasActiveGrant(session?.email)) return next();
     return res.status(403).json({
       code: 'ACCESS_REVOKED',
-      message: 'Your access to Placement Atlas is no longer approved. Please contact the admin.',
+      message: `Your access to ${PRODUCT_NAME} is no longer approved. Please contact the admin.`,
     });
   } catch (err) {
     return next(err);
@@ -145,7 +147,7 @@ export const requireRatingAuth = (req, res, next) => {
   const email = getRatingEmail(req);
   if (!email) {
     return res.status(403).json({
-      message: 'Skill ratings require an individual IIIT Delhi Google sign-in so admins can audit attribution.',
+      message: `Skill ratings require an individual ${INSTITUTE_NAME} Google sign-in so admins can audit attribution.`,
     });
   }
   req.ratingEmail = email;

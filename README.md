@@ -34,16 +34,17 @@ npm run dev             # http://localhost:5173/
 ## VM deployment
 - `placement-tracker.service` runs the Node application and restarts it automatically.
 - `placement-tracker-postgres` stores PostgreSQL data in the `placement-tracker-postgres-data` Docker volume and uses the `unless-stopped` restart policy.
-- `gwiz-tunnel.service` publishes both `yashkumarvaibhav.me` and `placement-atlas.yashkumarvaibhav.me` through Cloudflare Tunnel.
-- The portfolio is served from `yashkumarvaibhav.me`. Placement Atlas is served from `placement-atlas.yashkumarvaibhav.me`.
-- Requests to `yashkumarvaibhav.me/Placement_Tracker/` permanently redirect to the Placement Atlas subdomain.
+- `gwiz-tunnel.service` publishes `yashkumarvaibhav.me`, `kajukatli.yashkumarvaibhav.me` and the retired `placement-atlas.yashkumarvaibhav.me` through Cloudflare Tunnel.
+- The portfolio is served from `yashkumarvaibhav.me`. Kaju Katli is served from `kajukatli.yashkumarvaibhav.me` (`APP_HOST`).
+- `placement-atlas.yashkumarvaibhav.me` (`RETIRED_HOST`) is retired. It stays routed here only so old links reach the takedown notice instead of failing to resolve.
+- `yashkumarvaibhav.me/Placement_Tracker/` also answers with the notice. It deliberately no longer redirects anywhere, so the portfolio does not advertise the current hostname.
 
-## Site takedown
-- Placement Atlas is currently **taken down**. Every request to `placement-atlas.yashkumarvaibhav.me` and every `/api/*` route answers `503` with the takedown notice — no landing page, no sign-in, no data.
-- The switch is `SITE_TAKEDOWN` in `backend/.env` (`backend/src/takedown.js`). It is on unless the value is exactly `off`.
-- The portfolio on `yashkumarvaibhav.me`, served by the same process, is deliberately untouched — the notice points people there.
+## Retired hostname and the takedown switch
+- `RETIRED_HOST` answers every path — including its API and sign-in — with a `503` takedown notice pointing at the portfolio. This is unconditional; it is not tied to the switch below. See `backend/src/takedown.js`.
+- The notice names neither the product nor the current hostname: the retired host is public, and naming the new one there would undo the move.
+- `SITE_TAKEDOWN` in `backend/.env` is the emergency switch for taking the **live** host down too. It is off unless set to something other than `off`, and needs a backend restart.
+- The portfolio on `yashkumarvaibhav.me`, served by the same process, stays up under either — the notice points people there.
 - `placement-tracker-healthcheck.service` probes `/healthz` rather than `/api/ping`, because a suspended API is not a dead process. `/healthz` answers on the loopback hostname only.
-- To bring the site back: set `SITE_TAKEDOWN=off` in `backend/.env`, then `systemctl --user restart placement-tracker.service`.
 
 ## Viewer access
 - Google sign-in is verified by the backend against `GOOGLE_CLIENT_ID` and the `iiitd.ac.in` hosted domain. It is the only way to sign in.
@@ -62,7 +63,7 @@ npm run dev             # http://localhost:5173/
 - Read access to placement data requires a signed viewer session. Configure a stable `SESSION_SECRET` in `backend/.env`.
 
 ## Admin login
-- `yash25091@iiitd.ac.in` automatically receives admin access after a successful IIIT Delhi Google sign-in.
+- `yash25091@iiitd.ac.in` automatically receives admin access after a successful Lauda University Google sign-in.
 - There is no separate admin password or TOTP login endpoint.
 
 ## Placement Calendar

@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "test": "vitest run",
+    "test": "node scripts/check-imports.mjs && vitest run",
+    "check:imports": "node scripts/check-imports.mjs",
     "import:historical-mtech-cse": "node scripts/import-historical-mtech-cse.js",
     "import:historical-placement-details": "node scripts/import-historical-placement-details.js",
     "export:btech-2026-differences": "node scripts/export-btech-2026-differences.js",

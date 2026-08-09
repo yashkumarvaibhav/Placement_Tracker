@@ -1,16 +1,22 @@
-import { PLACEMENT_ATLAS_HOST, PORTFOLIO_URL, SITE_TAKEDOWN } from './config.js';
+import { APP_HOST, PORTFOLIO_URL, RETIRED_HOST, SITE_TAKEDOWN } from './config.js';
 
 const NOTICE_TITLE = 'This website has been taken down.';
 const NOTICE_BODY = 'Feel free to visit yashkumarvaibhav.me to view my portfolio.';
 
 const isUnder = (path, prefix) => path === prefix || path.startsWith(`${prefix}/`);
 
-// The takedown covers the Placement Atlas hostname, the API on every hostname, and the legacy
-// /Placement_Tracker path. It deliberately does NOT cover the portfolio site this same process
-// serves at yashkumarvaibhav.me — that is where the notice sends people.
-const isSuspended = (req) => req.hostname === PLACEMENT_ATLAS_HOST
-  || isUnder(req.path, '/api')
-  || isUnder(req.path, '/Placement_Tracker');
+// What the notice covers:
+//   - the retired hostname, always, on every path including its API;
+//   - the legacy /Placement_Tracker deep link on any hostname;
+//   - everything but the portfolio, whenever the SITE_TAKEDOWN switch is on.
+// The notice deliberately names neither the old product nor the new one: the retired host is
+// public, and pointing it at the current hostname would undo the move.
+const isSuspended = (req) => {
+  if (isUnder(req.path, '/Placement_Tracker')) return true;
+  if (req.hostname === RETIRED_HOST) return true;
+  if (!SITE_TAKEDOWN) return false;
+  return req.hostname === APP_HOST || isUnder(req.path, '/api');
+};
 
 const noticePage = () => `<!doctype html>
 <html lang="en">
@@ -18,7 +24,7 @@ const noticePage = () => `<!doctype html>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex" />
-    <title>Placement Atlas — taken down</title>
+    <title>Website taken down</title>
     <style>
       :root { color-scheme: light dark; }
       * { box-sizing: border-box; }
@@ -77,16 +83,16 @@ const noticePage = () => `<!doctype html>
       <div class="rule"></div>
       <h1>${NOTICE_TITLE}</h1>
       <p>Feel free to visit <a href="${PORTFOLIO_URL}">yashkumarvaibhav.me</a> to view my portfolio.</p>
-      <p class="fine">Access to Placement Atlas is suspended for all users.</p>
+      <p class="fine">Access to this site is suspended for all users.</p>
     </main>
   </body>
 </html>
 `;
 
 // Mounted ahead of every route: nothing behind it runs, so no landing page, no sign-in, and no
-// data endpoint is reachable while the takedown is on.
+// data endpoint is reachable on a suspended hostname.
 export const takedownGate = (req, res, next) => {
-  if (!SITE_TAKEDOWN || !isSuspended(req)) return next();
+  if (!isSuspended(req)) return next();
 
   // no-store keeps Cloudflare and browsers from holding on to the notice after the site returns.
   res.set('Cache-Control', 'no-store');

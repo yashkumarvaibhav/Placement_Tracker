@@ -352,19 +352,27 @@ describe('who is allowed to sign in', () => {
     expect(res.body.code).toBe('DOMAIN_NOT_ALLOWED');
   });
 
-  it('lets a whitelisted partner account in from outside the institute domain', async () => {
+  it('lets the whitelisted account in without consulting the roster', async () => {
     db.findPlacementRosterStudent.mockResolvedValue(null);
-    const res = await signInWith({ email: 'dharnish@knowledgechakra.com', hd: undefined });
+    const res = await signInWith({ email: 'vaibhav25006@iiitd.ac.in' });
     expect(res.status).toBe(200);
     expect(res.body.is_admin).toBe(false);
     expect(res.body.token).toBeTruthy();
+    expect(db.findPlacementRosterStudent).not.toHaveBeenCalled();
   });
 
-  it('lets a whitelisted Placement Cell account in', async () => {
+  it('no longer admits the partner account that used to be whitelisted', async () => {
+    db.findPlacementRosterStudent.mockResolvedValue(null);
+    const res = await signInWith({ email: 'dharnish@knowledgechakra.com', hd: undefined });
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('DOMAIN_NOT_ALLOWED');
+  });
+
+  it('no longer admits a Placement Cell address on sight', async () => {
     db.findPlacementRosterStudent.mockResolvedValue(null);
     const res = await signInWith({ email: 'admin-placement@iiitd.ac.in' });
-    expect(res.status).toBe(200);
-    expect(db.findPlacementRosterStudent).not.toHaveBeenCalled();
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('ACCESS_PENDING');
   });
 
   it('auto-approves a student sitting in the placement process', async () => {

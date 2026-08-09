@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { authMiddleware, getRatingEmail } from '../auth.js';
 import { invalidateGrant } from '../access.js';
 import { requireDbReady } from '../ready.js';
-import { PLACEMENT_ATLAS_HOST } from '../config.js';
+import { APP_HOST } from '../config.js';
 import {
   diffPlacementCalendarSnapshots,
   getLatestPlacementCalendarSnapshot,
@@ -74,7 +74,7 @@ router.get('/calendar/oauth/callback', requireDbReady, async (req, res) => {
     return res.redirect(302, redirectUrl);
   } catch (err) {
     console.error('Placement Calendar OAuth callback failed:', err.message);
-    const fallback = `https://${PLACEMENT_ATLAS_HOST}/#/admin/calendar?calendarOAuth=failed&reason=callback-error`;
+    const fallback = `https://${APP_HOST}/#/admin/calendar?calendarOAuth=failed&reason=callback-error`;
     return res.redirect(302, fallback);
   }
 });

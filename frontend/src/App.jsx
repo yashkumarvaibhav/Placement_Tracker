@@ -47,7 +47,7 @@ import {
   sortPrograms,
 } from './lib/students';
 import { formatDate, formatInr, formatPct, formatRelative } from './lib/format';
-import { DASHBOARD_TITLE, PRODUCT_NAME } from './institute';
+import { DASHBOARD_TITLE, INSTITUTE, PRODUCT_NAME } from './institute';
 
 // Admin-only bundle: viewers never need the calendar admin page, so load it on demand.
 const PlacementCalendarAdmin = lazy(() => import('./PlacementCalendarAdmin'));
@@ -805,7 +805,7 @@ const App = () => {
 
   const openSkillRating = (student) => {
     if (!sessionDetails?.can_rate) {
-      window.alert('Skill ratings require your individual IIIT Delhi Google sign-in. Please sign out and sign in again.');
+      window.alert(`Skill ratings require your individual ${INSTITUTE.name} Google sign-in. Please sign out and sign in again.`);
       return;
     }
     const studentId = student?.id ?? student?.student_id;
@@ -1584,7 +1584,7 @@ const App = () => {
                 <button
                   type="button"
                   className={isAdmin ? 'secondary admin-view-switch is-admin' : 'secondary admin-view-switch'}
-                  title={isAdmin ? 'Preview Placement Atlas exactly as a student sees it' : 'Return to administrative controls'}
+                  title={isAdmin ? `Preview ${PRODUCT_NAME} exactly as a student sees it` : 'Return to administrative controls'}
                   onClick={toggleAdminView}
                 >
                   {isAdmin ? 'Switch to student view' : 'Switch to admin view'}

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { formatRelative } from '../lib/format';
 import { Modal } from './Modal';
+import { INSTITUTE, PRODUCT_NAME } from '../institute';
 
 const SKILLS = [
   { key: 'overall', averageKey: 'rating_overall', label: 'Overall' },
@@ -129,7 +130,7 @@ const RatingsIntro = ({
     dismissText="Skip"
   >
     <div className="ratings-intro">
-      <span className="eyebrow">New in Placement Atlas</span>
+      <span className="eyebrow">New in {PRODUCT_NAME}</span>
       <h2>Recognise the skills in your batch</h2>
       <p className="ratings-intro-lead">Rate yourself or a batchmate from 1–10 across Overall, DSA, and ML skills. This quick demo shows exactly what becomes visible.</p>
 
@@ -146,7 +147,7 @@ const RatingsIntro = ({
 
       {!canRate && (
         <div className="rating-eligibility-note">
-          This session can see averages but cannot submit ratings. Sign out and sign in again with your IIIT Delhi Google account so attribution can be audited.
+          This session can see averages but cannot submit ratings. Sign out and sign in again with your {INSTITUTE.name} Google account so attribution can be audited.
         </div>
       )}
 
