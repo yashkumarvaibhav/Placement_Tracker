@@ -9,6 +9,7 @@ import {
 } from './db.js';
 import { sendPlacementCalendarChangeNotifications } from './calendar-notifications.js';
 import { APP_HOST } from './config.js';
+import { columnName } from './sheet-columns.js';
 
 const ADMIN_EMAIL = 'yash25091@iiitd.ac.in';
 const OAUTH_SCOPES = [
@@ -268,17 +269,6 @@ const isCellMeaningful = (cell) => (
   || !!cell.hyperlink
   || !!cell.note
 );
-
-const columnName = (index) => {
-  let name = '';
-  let current = index + 1;
-  while (current > 0) {
-    const remainder = (current - 1) % 26;
-    name = String.fromCharCode(65 + remainder) + name;
-    current = Math.floor((current - 1) / 26);
-  }
-  return name;
-};
 
 const headerKey = (value, index, seen) => {
   const base = String(value || '')

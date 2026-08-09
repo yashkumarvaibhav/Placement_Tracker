@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import { PRODUCT_NAME } from './config.js';
+import { columnName } from './sheet-columns.js';
 
 const DEFAULT_ADMIN_EMAIL = 'yash25091@iiitd.ac.in';
 
@@ -63,36 +64,132 @@ const formatDateTime = (value) => {
   });
 };
 
-const rowPreview = (row = {}) => (row.values || [])
-  .map((value) => String(value || '').trim())
-  .filter(Boolean)
-  .slice(0, 6)
-  .join(' | ') || 'Blank row';
+const BLANK = '(blank)';
+// Google Chat and WhatsApp both cut a text message off at 4096 characters, so the detail is
+// built against a budget and says how many entries it dropped rather than being truncated
+// mid-row by the transport.
+const DETAIL_CHAR_BUDGET = 3200;
 
-const changedRowPreview = (item = {}) => {
-  const before = rowPreview(item.before);
-  const after = rowPreview(item.after);
-  if (before === after) return `Row ${item.after?.source_row_number || item.before?.source_row_number}: content preserved`;
-  return `Row ${item.after?.source_row_number || item.before?.source_row_number}: ${before} -> ${after}`;
+const cellText = (value) => String(value ?? '').trim();
+
+// Every column of the row, in sheet order. Interior blanks are kept so the positions still line
+// up with the sheet; only the trailing empties Sheets pads rows with are dropped.
+const fullRow = (row = {}) => {
+  const values = [...(row.values || [])];
+  while (values.length && !cellText(values[values.length - 1])) values.pop();
+  if (!values.length) return 'Blank row';
+  return values.map(cellText).join(' | ');
 };
 
-const listRows = (title, rows = [], mapper = rowPreview) => {
-  if (!rows.length) return '';
-  const items = rows.slice(0, 8).map((row) => `- ${mapper(row)}`).join('\n');
-  const suffix = rows.length > 8 ? `\n- ...and ${rows.length - 8} more` : '';
-  return `\n${title}\n${items}${suffix}\n`;
+const rowNumberOf = (item = {}) => item.after?.source_row_number
+  ?? item.before?.source_row_number
+  ?? item.source_row_number
+  ?? '?';
+
+// Column headings come from the captured header row; a column with no heading falls back to its
+// spreadsheet letter so it is still named rather than reported as an index.
+const columnLabeller = (diff) => {
+  const headers = diff?.target?.raw_snapshot?.headers
+    || diff?.base?.raw_snapshot?.headers
+    || [];
+  return (index) => {
+    const header = headers[index];
+    const label = cellText(header?.label);
+    return label || header?.column || columnName(index);
+  };
 };
 
-const listRowsHtml = (title, rows = [], mapper = rowPreview) => {
-  if (!rows.length) return '';
-  const items = rows.slice(0, 8)
-    .map((row) => `<li>${escapeHtml(mapper(row))}</li>`)
-    .join('');
-  const suffix = rows.length > 8 ? `<li>...and ${rows.length - 8} more</li>` : '';
-  return `<h3>${escapeHtml(title)}</h3><ul>${items}${suffix}</ul>`;
+const cellAttribute = (row, index, key) => {
+  const cell = Array.isArray(row?.cells) ? row.cells[index] : null;
+  return cell?.[key] || null;
 };
 
-const buildNotificationContent = ({ snapshot, diff }) => {
+// One line per column that actually moved. A row can also register as changed with its display
+// text untouched — a formula, link or note edit — so those are reported too instead of the old
+// "content preserved", which said something changed without saying what.
+const describeCellChanges = (before, after, labelFor) => {
+  const beforeValues = before?.values || [];
+  const afterValues = after?.values || [];
+  const width = Math.max(
+    beforeValues.length,
+    afterValues.length,
+    (before?.cells || []).length,
+    (after?.cells || []).length,
+  );
+
+  const changes = [];
+  for (let index = 0; index < width; index += 1) {
+    const from = cellText(beforeValues[index]);
+    const to = cellText(afterValues[index]);
+    if (from !== to) {
+      changes.push(`changed ${labelFor(index)} from ${from || BLANK} to ${to || BLANK}`);
+      continue;
+    }
+    for (const key of ['formula', 'hyperlink', 'note']) {
+      const fromAttribute = cellAttribute(before, index, key);
+      const toAttribute = cellAttribute(after, index, key);
+      if (fromAttribute !== toAttribute) {
+        changes.push(`changed ${labelFor(index)} ${key} from ${fromAttribute || BLANK} to ${toAttribute || BLANK}`);
+      }
+    }
+  }
+  return changes;
+};
+
+const changedRowBlock = (item, labelFor) => {
+  const changes = describeCellChanges(item?.before, item?.after, labelFor);
+  return [
+    `Row ${rowNumberOf(item)}`,
+    `earlier row : ${fullRow(item?.before)}`,
+    `changed row : ${fullRow(item?.after)}`,
+    ...(changes.length
+      ? changes.map((change) => `exact change : ${change}`)
+      : ['exact change : none in the cell contents']),
+  ].join('\n');
+};
+
+const visibilityBlock = (item) => {
+  const was = item?.before?.hidden ? 'hidden' : 'visible';
+  const now = item?.after?.hidden ? 'hidden' : 'visible';
+  return [
+    `Row ${rowNumberOf(item)}`,
+    `row : ${fullRow(item?.after || item?.before)}`,
+    `exact change : changed visibility from ${was} to ${now}`,
+  ].join('\n');
+};
+
+const plainRowBlock = (row) => `Row ${rowNumberOf(row)}\nrow : ${fullRow(row)}`;
+
+// Sections share one budget so a long list of added rows cannot crowd out the changed ones.
+const sectionWriter = () => {
+  let remaining = DETAIL_CHAR_BUDGET;
+  return (title, items = [], toBlock) => {
+    if (!items.length) return '';
+    const kept = [];
+    for (const item of items) {
+      const block = toBlock(item);
+      if (block.length + 2 > remaining) break;
+      remaining -= block.length + 2;
+      kept.push(block);
+    }
+    const omitted = items.length - kept.length;
+    const tail = omitted ? `\n\n...and ${omitted} more` : '';
+    return `\n${title}\n${kept.join('\n\n')}${tail}\n`;
+  };
+};
+
+const buildChangeDetail = (diff) => {
+  const labelFor = columnLabeller(diff);
+  const section = sectionWriter();
+  return [
+    section('Changed rows', diff?.rows?.changed || [], (item) => changedRowBlock(item, labelFor)),
+    section('Added rows', diff?.rows?.added || [], plainRowBlock),
+    section('Removed rows', diff?.rows?.removed || [], plainRowBlock),
+    section('Visibility changes', diff?.rows?.hidden_changed || [], visibilityBlock),
+  ].filter(Boolean).join('');
+};
+
+export const buildNotificationContent = ({ snapshot, diff }) => {
   const rowSummary = diff?.rows?.summary || {
     added: snapshot?.total_row_count || 0,
     removed: 0,
@@ -101,6 +198,7 @@ const buildNotificationContent = ({ snapshot, diff }) => {
   };
   const subject = `Placement Calendar v${snapshot.version} captured: ${rowSummary.added} added, ${rowSummary.removed} removed, ${rowSummary.changed} changed`;
   const capturedAt = formatDateTime(snapshot.created_at);
+  const detail = buildChangeDetail(diff);
   const text = [
     `Placement Calendar version ${snapshot.version} was captured at ${capturedAt}.`,
     '',
@@ -113,18 +211,18 @@ const buildNotificationContent = ({ snapshot, diff }) => {
     `Removed rows: ${rowSummary.removed}`,
     `Changed rows: ${rowSummary.changed}`,
     `Visibility changes: ${rowSummary.hidden_changed}`,
-    listRows('Added rows', diff?.rows?.added || []),
-    listRows('Removed rows', diff?.rows?.removed || []),
-    listRows('Changed rows', diff?.rows?.changed || [], changedRowPreview),
-    listRows('Visibility changes', diff?.rows?.hidden_changed || [], changedRowPreview),
+    detail,
     '',
     `Open ${PRODUCT_NAME} -> Calendar to inspect the preserved sheet and cell history.`,
   ].filter(Boolean).join('\n');
-  const shortText = [
+  // What the chat and WhatsApp channels send. They used to carry the counts alone, which said
+  // something had changed without saying what.
+  const chatText = [
     `Placement Calendar v${snapshot.version} captured`,
     `Rows: ${snapshot.total_row_count}, hidden: ${snapshot.hidden_row_count}, events: ${snapshot.total_event_count}`,
     `Changes: +${rowSummary.added}, -${rowSummary.removed}, ${rowSummary.changed} changed, ${rowSummary.hidden_changed} visibility`,
-  ].join('\n');
+    detail,
+  ].filter(Boolean).join('\n');
 
   const html = `
     <div style="font-family: Arial, sans-serif; color: #202124; line-height: 1.5;">
@@ -141,15 +239,12 @@ const buildNotificationContent = ({ snapshot, diff }) => {
         &nbsp; <strong>Changed:</strong> ${escapeHtml(rowSummary.changed)}
         &nbsp; <strong>Visibility:</strong> ${escapeHtml(rowSummary.hidden_changed)}
       </p>
-      ${listRowsHtml('Added rows', diff?.rows?.added || [])}
-      ${listRowsHtml('Removed rows', diff?.rows?.removed || [])}
-      ${listRowsHtml('Changed rows', diff?.rows?.changed || [], changedRowPreview)}
-      ${listRowsHtml('Visibility changes', diff?.rows?.hidden_changed || [], changedRowPreview)}
+      ${detail ? `<pre style="white-space: pre-wrap; font-family: 'Courier New', monospace; font-size: 13px; background: #f4f6f6; border: 1px solid #e0e4e4; border-radius: 6px; padding: 12px;">${escapeHtml(detail.trim())}</pre>` : ''}
       <p>Open ${PRODUCT_NAME} -> Calendar to inspect the preserved sheet and cell history.</p>
     </div>
   `;
 
-  return { subject, text, shortText, html };
+  return { subject, text, chatText, html };
 };
 
 export const sendPlacementCalendarChangeEmail = async ({ snapshot, diff }) => {
@@ -176,11 +271,11 @@ export const sendPlacementCalendarGoogleChatNotification = async ({ snapshot, di
     return { channel: 'google_chat', sent: false, reason: 'webhook-not-configured' };
   }
 
-  const { shortText } = buildNotificationContent({ snapshot, diff });
+  const { chatText } = buildNotificationContent({ snapshot, diff });
   const response = await fetch(googleChatWebhookUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: shortText }),
+    body: JSON.stringify({ text: chatText }),
   });
 
   if (!response.ok) {
@@ -195,7 +290,7 @@ export const sendPlacementCalendarWhatsappNotification = async ({ snapshot, diff
     return { channel: 'whatsapp', sent: false, reason: 'whatsapp-not-configured' };
   }
 
-  const { shortText } = buildNotificationContent({ snapshot, diff });
+  const { chatText } = buildNotificationContent({ snapshot, diff });
   const response = await fetch(`https://graph.facebook.com/${whatsappApiVersion}/${whatsappPhoneNumberId}/messages`, {
     method: 'POST',
     headers: {
@@ -209,7 +304,7 @@ export const sendPlacementCalendarWhatsappNotification = async ({ snapshot, diff
       type: 'text',
       text: {
         preview_url: false,
-        body: shortText,
+        body: chatText,
       },
     }),
   });
