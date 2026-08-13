@@ -706,6 +706,14 @@ const App = () => {
     await navigator.clipboard.writeText(window.location.href);
   };
 
+  // The URL already carries ?student=/?company= for whichever profile is open (see the
+  // location-sync effects above), so the current address is itself the shareable deep link —
+  // just like copyCurrentLink, opening it in a new tab needs nothing extra.
+  const openCurrentLinkInNewTab = () => {
+    if (typeof window === 'undefined') return;
+    window.open(window.location.href, '_blank', 'noopener,noreferrer');
+  };
+
   const resetOfferForm = () => {
     setOfferSearch('');
     setOfferStudentId('');
@@ -791,6 +799,24 @@ const App = () => {
   const closeStudentDetail = () => {
     setSelectedStudent(null);
     setSelectedStudentId('');
+  };
+
+  // Cross-navigation from inside one detail modal to another record (e.g. a student named
+  // inside a company's "Hired students" list, or a company named inside a student's offer
+  // timeline): look the full record up by id and switch to the page that actually renders
+  // that modal, the same way the dashboard's "recent companies" list already does.
+  const openStudentById = (studentId) => {
+    const student = students.find((s) => String(s.id) === String(studentId));
+    if (!student) return;
+    openStudentDetail(student);
+    navigate(`/students?batch=${activeBatch.key}&student=${student.id}`);
+  };
+
+  const openCompanyById = (companyId) => {
+    const company = companies.find((c) => String(c.id) === String(companyId));
+    if (!company) return;
+    openCompanyDetail(company);
+    navigate(`/companies?batch=${activeBatch.key}&company=${company.id}`);
   };
 
   const ratingsIntroStorageKey = sessionDetails?.ratings_account_id
@@ -1000,7 +1026,7 @@ const App = () => {
         // stay distinguishable.
         const programLabel = s.program ? (isOverallScope && s.degree ? `${s.degree} ${s.program}` : s.program) : null;
         if (programLabel) stats[cid].programs[programLabel] = (stats[cid].programs[programLabel] || 0) + 1;
-        stats[cid].students.push({ name: s.name, roll: s.roll_number, program: s.program, branch_group: branchGroup, offer: o });
+        stats[cid].students.push({ id: s.id, name: s.name, roll: s.roll_number, program: s.program, branch_group: branchGroup, offer: o });
       });
     });
     return stats;
@@ -2212,6 +2238,7 @@ const App = () => {
                         <button type="button" className="secondary" onClick={() => moveSelectedCompany(-1)} disabled={filteredCompanies.length < 2}>Previous</button>
                         <button type="button" className="secondary" onClick={() => moveSelectedCompany(1)} disabled={filteredCompanies.length < 2}>Next</button>
                         <button type="button" className="secondary" onClick={copyCurrentLink}>Copy link</button>
+                        <button type="button" className="secondary" onClick={openCurrentLinkInNewTab}>Open in new tab ↗</button>
                       </div>
                       <div className="info-grid">
                         {isAggregateOnly ? (
@@ -2317,8 +2344,17 @@ const App = () => {
                           <div className="hired-students-list">
                             {stats.students.map((student, index) => (
                               <div key={`${student.roll}-${index}`}>
-                                <span className="student-avatar">{initialsFor(student.name)}</span>
-                                <div><strong>{student.name}</strong><small>{student.roll} · {student.program}{student.offer?.offer_type ? ` · ${student.offer.offer_type}` : ''}</small></div>
+                                {student.id ? (
+                                  <button type="button" className="hired-student-link" onClick={() => openStudentById(student.id)}>
+                                    <span className="student-avatar">{initialsFor(student.name)}</span>
+                                    <div><strong>{student.name}</strong><small>{student.roll} · {student.program}{student.offer?.offer_type ? ` · ${student.offer.offer_type}` : ''}</small></div>
+                                  </button>
+                                ) : (
+                                  <>
+                                    <span className="student-avatar">{initialsFor(student.name)}</span>
+                                    <div><strong>{student.name}</strong><small>{student.roll} · {student.program}{student.offer?.offer_type ? ` · ${student.offer.offer_type}` : ''}</small></div>
+                                  </>
+                                )}
                                 {isAdmin && <ConvertToPpo offer={student.offer} onConvert={convertOfferToPpoAction} />}
                               </div>
                             ))}
@@ -2629,6 +2665,7 @@ const App = () => {
                         <button type="button" className="secondary" onClick={() => moveSelectedStudent(-1)} disabled={filteredStudents.length < 2}>Previous</button>
                         <button type="button" className="secondary" onClick={() => moveSelectedStudent(1)} disabled={filteredStudents.length < 2}>Next</button>
                         <button type="button" className="secondary" onClick={copyCurrentLink}>Copy link</button>
+                        <button type="button" className="secondary" onClick={openCurrentLinkInNewTab}>Open in new tab ↗</button>
                         <button type="button" onClick={() => openSkillRating(selectedStudent)}>
                           {myRatings[String(selectedStudent.id)] ? 'Change my rating' : 'Rate skills'}
                         </button>
@@ -2639,7 +2676,15 @@ const App = () => {
                           <article key={offer.id || index}>
                             <span className="timeline-marker">{String(index + 1).padStart(2, '0')}</span>
                             <div>
-                              <span className="eyebrow">{offer.offer_type || 'Offer'} · {formatDate(offer.offer_date)}</span><h3>{offer.company_name || selectedStudent.company_name || 'Company not recorded'}</h3><p>{formatInr(offer.ctc ?? offer.company_ctc, 'p.a.')} · {formatInr(offer.stipend ?? offer.company_stipend, 'p.m.')}</p>
+                              <span className="eyebrow">{offer.offer_type || 'Offer'} · {formatDate(offer.offer_date)}</span>
+                              {(offer.company_id || selectedStudent.company_id) ? (
+                                <button type="button" className="timeline-company-link" onClick={() => openCompanyById(offer.company_id || selectedStudent.company_id)}>
+                                  <h3>{offer.company_name || selectedStudent.company_name || 'Company not recorded'}</h3>
+                                </button>
+                              ) : (
+                                <h3>{offer.company_name || selectedStudent.company_name || 'Company not recorded'}</h3>
+                              )}
+                              <p>{formatInr(offer.ctc ?? offer.company_ctc, 'p.a.')} · {formatInr(offer.stipend ?? offer.company_stipend, 'p.m.')}</p>
                               {isAdmin && <ConvertToPpo offer={offer} onConvert={convertOfferToPpoAction} />}
                             </div>
                           </article>
