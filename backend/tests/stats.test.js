@@ -91,6 +91,18 @@ describe('compensation statistics', () => {
     expect(stats.highest_ctc).toBeNull();
   });
 
+  it('reports the lowest CTC/stipend alongside the highest, one value per student', async () => {
+    fixtures.students = [student(1, 'Multi offer'), student(2, 'Single offer')];
+    fixtures.offers = [offer(1, 3000000, 100000), offer(1, 1000000, 40000), offer(2, 2000000, 60000)];
+
+    const stats = await buildStats('btech-2027');
+
+    // Student 1's floor offer (1,000,000 / 40,000) must not surface here either: the site
+    // still represents each student once, at their own best package.
+    expect(stats.lowest_ctc).toBe(2000000);
+    expect(stats.lowest_stipend).toBe(60000);
+  });
+
   // 0 is the "known unknown" sentinel (e.g. a PPO recorded before its CTC was confirmed): it
   // must be excluded from every compensation figure exactly like a missing value, not treated
   // as a real ₹0 package that drags the average and median down.
@@ -135,6 +147,21 @@ describe('offer-type counts', () => {
     expect(stats.total_fte_offers).toBe(2);
     expect(stats.total_combo_offers).toBe(1);
     expect(stats.internship_percentage).toBe(toPctFixture(2, 3));
+  });
+
+  it('excludes Not Sitting/Ineligible students from the internship/FTE offer-rate denominator, like placement_percentage', async () => {
+    fixtures.students = [
+      student(1, 'FTE offer'),
+      { ...student(2, 'Not sitting'), placement_status: 'Not Sitting' },
+    ];
+    fixtures.offers = [offer(1, 1200000)];
+
+    const stats = await buildStats('btech-2027');
+
+    // 1 FTE offer over 1 placement-eligible student (the "Not Sitting" student is excluded from
+    // the denominator, the same way they're excluded from overall_placement_percentage) — not over 2.
+    expect(stats.fte_percentage).toBe(toPctFixture(1, 1));
+    expect(stats.overall_placement_percentage).toBe(toPctFixture(1, 1));
   });
 });
 

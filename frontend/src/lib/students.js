@@ -26,9 +26,11 @@ const EMPTY_SLICE_SUMMARY = {
   total_A_offers: 0,
   total_B_offers: 0,
   highest_ctc: null,
+  lowest_ctc: null,
   average_ctc: null,
   median_ctc: null,
   highest_stipend: null,
+  lowest_stipend: null,
   average_stipend: null,
   median_stipend: null,
   placement_percentage: 0,
@@ -142,14 +144,18 @@ const buildProgramSummaries = (students, placementsOnly = false) => {
       total_A_offers: categories.A,
       total_B_offers: categories.B,
       highest_ctc: ctcValues.length ? Math.max(...ctcValues) : null,
+      lowest_ctc: ctcValues.length ? Math.min(...ctcValues) : null,
       average_ctc: average(ctcValues),
       median_ctc: median(ctcValues),
       highest_stipend: stipendValues.length ? Math.max(...stipendValues) : null,
+      lowest_stipend: stipendValues.length ? Math.min(...stipendValues) : null,
       average_stipend: average(stipendValues),
       median_stipend: median(stipendValues),
       placement_percentage: placementsOnly ? null : toPct(placed, placementEligibleTotal),
-      internship_percentage: toPct(internshipCount, total),
-      fte_percentage: toPct(fteCount, total),
+      // Same denominator as placement_percentage: students excluded from the placement race
+      // (Not Sitting / Ineligible) shouldn't dilute the internship/FTE offer rate either.
+      internship_percentage: toPct(internshipCount, placementEligibleTotal),
+      fte_percentage: toPct(fteCount, placementEligibleTotal),
     };
   };
 

@@ -1878,6 +1878,7 @@ const App = () => {
               )}
               {!isOfficial2025 && dashboardView === 'compensation' && <section className="metric-ledger comp-ledger">
                 <MetricTile metricKey="highest_ctc" label="Highest CTC" value={formatInr(activeOverviewSummary.highest_ctc, 'p.a.')} note="Peak recorded package" />
+                <MetricTile metricKey="lowest_ctc" label="Lowest CTC" value={formatInr(activeOverviewSummary.lowest_ctc, 'p.a.')} note="Floor recorded package" />
                 <MetricTile metricKey="median_ctc" label="Median CTC" value={formatInr(activeOverviewSummary.median_ctc, 'p.a.')} note="Best package per student" />
                 <MetricTile metricKey="average_ctc" label="Average CTC" value={formatInr(activeOverviewSummary.average_ctc, 'p.a.')} note="Best package per student" />
                 <MetricTile metricKey="median_stipend" label="Median stipend" value={formatInr(activeOverviewSummary.median_stipend, 'p.m.')} note="Best stipend per student" />
@@ -1908,10 +1909,13 @@ const App = () => {
                     { label: 'Excluded', value: activeOverviewSummary.excluded_students || 0, tone: 'muted' },
                   ]} />
                   <div className="dual-donuts">
-                    <DonutChart value={activeOverviewSummary.total_fte_offers} total={activeOverviewSummary.total_students} label="FTE intensity" detail={`${activeOverviewSummary.total_fte_offers || 0} offers`} tone="blue" />
+                    {/* Same denominator as placement_percentage: students excluded from the placement
+                        race (Not Sitting / Ineligible) shouldn't dilute these offer-rate donuts either.
+                        placements_only batches don't track eligibility, so they fall back to total_students. */}
+                    <DonutChart value={activeOverviewSummary.total_fte_offers} total={activeOverviewSummary.eligible_students ?? activeOverviewSummary.total_students} label="FTE intensity" detail={`${activeOverviewSummary.total_fte_offers || 0} offers`} tone="blue" />
                     <DonutChart
                       value={activeOverviewSummary.total_intern_offers || 0}
-                      total={activeOverviewSummary.total_students}
+                      total={activeOverviewSummary.eligible_students ?? activeOverviewSummary.total_students}
                       label="Internship intensity"
                       detail={`${activeOverviewSummary.total_intern_offers || 0} offers with internship`}
                     />
@@ -2267,7 +2271,14 @@ const App = () => {
                             {selectedCompany.roles.map((pkg, i) => (
                               <div className="info-item" key={i}>
                                 <div className="label">{pkg.role || pkg.offer_type || 'Role'}{pkg.degree && pkg.degree !== 'All' ? ` · ${pkg.degree}` : ''}</div>
-                                <div className="value">{[pkg.offer_type, pkg.ctc ? formatInr(pkg.ctc, 'p.a.') : null, pkg.stipend ? formatInr(pkg.stipend, 'p.m.') : null].filter(Boolean).join(' · ') || '—'}</div>
+                                {/* Show CTC/stipend only for the field(s) the offer type actually carries, so a
+                                    pure-Intern role isn't shown an irrelevant "Unknown" CTC — but once a field is
+                                    relevant, an unset value reads "Unknown" instead of silently disappearing. */}
+                                <div className="value">{[
+                                  pkg.offer_type,
+                                  isFullTimeOfferType(pkg.offer_type) ? formatInr(pkg.ctc, 'p.a.') : null,
+                                  isInternshipOfferType(pkg.offer_type) ? formatInr(pkg.stipend, 'p.m.') : null,
+                                ].filter(Boolean).join(' · ') || '—'}</div>
                               </div>
                             ))}
                           </div>
