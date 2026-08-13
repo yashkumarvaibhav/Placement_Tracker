@@ -90,4 +90,54 @@ describe('compensation statistics', () => {
     expect(stats.average_ctc).toBeNull();
     expect(stats.highest_ctc).toBeNull();
   });
+
+  // 0 is the "known unknown" sentinel (e.g. a PPO recorded before its CTC was confirmed): it
+  // must be excluded from every compensation figure exactly like a missing value, not treated
+  // as a real ₹0 package that drags the average and median down.
+  it('excludes a 0 CTC/stipend (known-unknown sentinel) from compensation statistics', async () => {
+    fixtures.students = [student(1, 'Unknown PPO'), student(2, 'Confirmed offer')];
+    fixtures.offers = [
+      { ...offer(1, 0), offer_type: 'Intern + PPO' },
+      offer(2, 2000000, 0),
+    ];
+
+    const stats = await buildStats('btech-2027');
+
+    expect(stats.median_ctc).toBe(2000000);
+    expect(stats.average_ctc).toBe(2000000);
+    expect(stats.highest_ctc).toBe(2000000);
+    expect(stats.median_stipend).toBeNull();
+    expect(stats.average_stipend).toBeNull();
+    expect(stats.highest_stipend).toBeNull();
+  });
 });
+
+describe('offer-type counts', () => {
+  beforeEach(() => {
+    fixtures.companies = [{ id: 1, name: 'Acme' }];
+    fixtures.students = [];
+    fixtures.offers = [];
+  });
+
+  it('counts combined internship+FTE/PPO offers as both an internship and an FTE outcome', async () => {
+    fixtures.students = [student(1, 'Combo'), student(2, 'Intern only'), student(3, 'FTE only')];
+    fixtures.offers = [
+      { ...offer(1, 1500000), offer_type: 'Intern + PPO' },
+      { ...offer(2, null), offer_type: 'Intern' },
+      { ...offer(3, 1200000), offer_type: 'FTE' },
+    ];
+
+    const stats = await buildStats('btech-2027');
+
+    // total_intern_offers is documented (frontend METRIC_DEFINITIONS) as including combined
+    // outcomes, and must agree with internship_percentage's own count of the same offers.
+    expect(stats.total_intern_offers).toBe(2);
+    expect(stats.total_fte_offers).toBe(2);
+    expect(stats.total_combo_offers).toBe(1);
+    expect(stats.internship_percentage).toBe(toPctFixture(2, 3));
+  });
+});
+
+function toPctFixture(num, den) {
+  return Number(((num / den) * 100).toFixed(2));
+}

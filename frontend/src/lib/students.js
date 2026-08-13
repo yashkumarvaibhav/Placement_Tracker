@@ -78,11 +78,13 @@ const buildProgramSummaries = (students, placementsOnly = false) => {
 
   // Compensation is a per-student statistic: a student with several offers is represented once,
   // by their best package, so a second (lower) offer cannot drag the mean or median down.
+  // A value of 0 is the "known unknown" sentinel (e.g. a PPO recorded before its CTC was
+  // confirmed) and, like a missing value, is excluded rather than treated as a real ₹0 package.
   const bestValuePerStudent = (offers, field, companyField) => {
     const best = new Map();
     offers.forEach((offer) => {
       const value = offer[field] ?? offer[companyField];
-      if (typeof value !== 'number') return;
+      if (typeof value !== 'number' || value <= 0) return;
       const current = best.get(offer.studentKey);
       if (current === undefined || value > current) best.set(offer.studentKey, value);
     });
@@ -131,7 +133,9 @@ const buildProgramSummaries = (students, placementsOnly = false) => {
       placed_students: placed,
       unplaced_students: placementsOnly ? null : unplacedStudents,
       total_offers: offersSubset.length,
-      total_intern_offers: internOffers.length,
+      // Combined outcomes (Intern+FTE, Intern+PPO, Summer Intern+FTE/PPO) did include an
+      // internship, so they count here too — matching internship_percentage below.
+      total_intern_offers: internshipCount,
       total_fte_offers: fteCount,
       total_combo_offers: comboOffers.length,
       total_Aplus_offers: categories.Aplus,

@@ -32,12 +32,19 @@ router.post('/', authMiddleware, async (req, res) => {
 });
 
 // Convert an internship-only offer (Intern / Summer Intern) into its "+ PPO" variant.
-// The full-time CTC is required; role and PPO offer date are optional refinements.
+// The full-time CTC is required unless the caller explicitly marks it as not known yet
+// (ctc_known: false), in which case it is stored as 0 — the sentinel that keeps an
+// unconfirmed package out of every CTC average/median/high until it is filled in, without
+// blocking the record of the PPO itself. Role and PPO offer date are optional refinements.
 router.post('/:id/convert-to-ppo', authMiddleware, async (req, res) => {
   try {
-    const ctc = Number(req.body?.ctc);
-    if (!Number.isFinite(ctc) || ctc <= 0) {
-      return res.status(400).json({ message: 'A full-time CTC (₹ p.a.) is required to convert an offer to PPO' });
+    const ctcKnown = req.body?.ctc_known !== false;
+    let ctc = 0;
+    if (ctcKnown) {
+      ctc = Number(req.body?.ctc);
+      if (!Number.isFinite(ctc) || ctc <= 0) {
+        return res.status(400).json({ message: 'A full-time CTC (₹ p.a.) is required to convert an offer to PPO, or mark it as not known yet.' });
+      }
     }
     const updated = await convertOfferToPpo(req.params.id, {
       ctc,

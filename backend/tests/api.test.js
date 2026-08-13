@@ -181,6 +181,24 @@ describe('request validation policy', () => {
     expect(db.convertOfferToPpo).toHaveBeenCalledWith('12', expect.objectContaining({ ctc: 2500000, role: 'SDE' }));
   });
 
+  it('accepts a PPO conversion explicitly marked CTC-unknown, storing the 0 sentinel', async () => {
+    const res = await request(app)
+      .post('/api/offers/12/convert-to-ppo')
+      .set('Authorization', asAdmin())
+      .send({ ctc_known: false, role: 'SDE' });
+    expect(res.status).toBe(200);
+    expect(db.convertOfferToPpo).toHaveBeenCalledWith('12', expect.objectContaining({ ctc: 0, role: 'SDE' }));
+  });
+
+  it('still requires a positive CTC when ctc_known is not set to false', async () => {
+    const res = await request(app)
+      .post('/api/offers/12/convert-to-ppo')
+      .set('Authorization', asAdmin())
+      .send({});
+    expect(res.status).toBe(400);
+    expect(db.convertOfferToPpo).not.toHaveBeenCalled();
+  });
+
   it('rejects a placed student whose company is from a different cycle', async () => {
     db.getCompany.mockResolvedValueOnce({ id: 5, graduation_year: 2026 });
     const res = await request(app)

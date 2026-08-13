@@ -135,11 +135,13 @@ export const buildStats = async (batchKey = DEFAULT_BATCH_KEY, graduationYear = 
 
   // Compensation is a per-student statistic: a student with several offers is represented once,
   // by their best package, so a second (lower) offer cannot drag the mean or median down.
+  // A value of 0 is the "known unknown" sentinel (e.g. a PPO recorded before its CTC was
+  // confirmed) and, like a missing value, is excluded rather than treated as a real ₹0 package.
   const bestValuePerStudent = (offerRows, field, companyField) => {
     const best = new Map();
     for (const offer of offerRows) {
       const value = offer[field] ?? offer[companyField];
-      if (typeof value !== 'number') continue;
+      if (typeof value !== 'number' || value <= 0) continue;
       const current = best.get(offer.student_id);
       if (current === undefined || value > current) best.set(offer.student_id, value);
     }
@@ -188,7 +190,10 @@ export const buildStats = async (batchKey = DEFAULT_BATCH_KEY, graduationYear = 
       placed_students: placed,
       unplaced_students: batch.placements_only ? null : unplacedStudents,
       total_offers: offersSubset.length,
-      total_intern_offers: internSub.length,
+      // Combined outcomes (Intern+FTE, Intern+PPO, Summer Intern+FTE/PPO) did include an
+      // internship, so they count here too — matching internship_percentage below and this
+      // field's own definition in the frontend (see METRIC_DEFINITIONS.total_intern_offers).
+      total_intern_offers: internCount,
       total_fte_offers: fteSub.length + comboSub.length,
       total_combo_offers: comboSub.length,
       total_Aplus_offers: byCategory.Aplus,

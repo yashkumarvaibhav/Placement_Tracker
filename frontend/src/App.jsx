@@ -1048,8 +1048,9 @@ const App = () => {
         av = companyHiringStats[a.id]?.CB || 0;
         bv = companyHiringStats[b.id]?.CB || 0;
       } else if (field === 'ctc' || field === 'stipend') {
-        av = a[field] ?? -Infinity;
-        bv = b[field] ?? -Infinity;
+        // 0 is the "known unknown" sentinel, so it must sink to -Infinity like a missing value.
+        av = a[field] || -Infinity;
+        bv = b[field] || -Infinity;
       } else if (field === 'offer_date') {
         av = a.offer_date ? new Date(a.offer_date).getTime() : 0;
         bv = b.offer_date ? new Date(b.offer_date).getTime() : 0;
@@ -1126,7 +1127,8 @@ const App = () => {
             const vals = s.offers.map((o) => o[f] ?? o[`company_${f}`]).filter(Boolean);
             return vals.length ? Math.max(...vals) : -Infinity;
           }
-          return s[f] ?? s[`company_${f}`] ?? -Infinity;
+          // 0 is the "known unknown" sentinel, so it must sink to -Infinity like a missing value.
+          return s[f] || s[`company_${f}`] || -Infinity;
         };
         av = getVal(a, field);
         bv = getVal(b, field);
@@ -1908,10 +1910,10 @@ const App = () => {
                   <div className="dual-donuts">
                     <DonutChart value={activeOverviewSummary.total_fte_offers} total={activeOverviewSummary.total_students} label="FTE intensity" detail={`${activeOverviewSummary.total_fte_offers || 0} offers`} tone="blue" />
                     <DonutChart
-                      value={(activeOverviewSummary.total_intern_offers || 0) + (activeOverviewSummary.total_combo_offers || 0)}
+                      value={activeOverviewSummary.total_intern_offers || 0}
                       total={activeOverviewSummary.total_students}
                       label="Internship intensity"
-                      detail={`${(activeOverviewSummary.total_intern_offers || 0) + (activeOverviewSummary.total_combo_offers || 0)} offers with internship`}
+                      detail={`${activeOverviewSummary.total_intern_offers || 0} offers with internship`}
                     />
                   </div>
                 </article>
@@ -1925,7 +1927,9 @@ const App = () => {
                   ]} />
                   <div className="offer-type-ledger">
                     <div><span>FTE</span><strong>{activeOverviewSummary.total_fte_offers || 0}</strong></div>
-                    <div><span>Intern only</span><strong>{activeOverviewSummary.total_intern_offers || 0}</strong></div>
+                    {/* total_intern_offers counts every offer with an internship component, including
+                        combined ones (see METRIC_DEFINITIONS); subtract those out for the "only" row. */}
+                    <div><span>Intern only</span><strong>{(activeOverviewSummary.total_intern_offers || 0) - (activeOverviewSummary.total_combo_offers || 0)}</strong></div>
                     <div><span>Combined</span><strong>{activeOverviewSummary.total_combo_offers || 0}</strong></div>
                   </div>
                 </article>

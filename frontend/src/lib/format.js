@@ -1,8 +1,11 @@
 // Display formatting shared across pages and components.
 
+// Used only for CTC/stipend figures. 0 is the "known unknown" sentinel — a package that is
+// confirmed to exist (e.g. a PPO) but whose amount hasn't been recorded yet — so it reads the
+// same as a missing value rather than as a real ₹0 offer.
 const formatInr = (val, period = 'p.a.') => {
-  if (val === null || val === undefined || Number.isNaN(Number(val))) return '—';
   const number = Number(val);
+  if (val === null || val === undefined || Number.isNaN(number) || number <= 0) return 'Unknown';
   // Annual figures read more naturally in LPA for a placement audience; monthly stays in rupees.
   if (period === 'p.a.') {
     const lpa = number / 100000;

@@ -12,6 +12,7 @@ const ConvertToPpo = ({ offer, onConvert }) => {
   const [expanded, setExpanded] = useState(false);
   const [role, setRole] = useState('');
   const [ctc, setCtc] = useState('');
+  const [ctcUnknown, setCtcUnknown] = useState(false);
   const [offerDate, setOfferDate] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -23,6 +24,7 @@ const ConvertToPpo = ({ offer, onConvert }) => {
   const openForm = () => {
     setRole(offer.role || '');
     setCtc(offer.company_ctc ?? '');
+    setCtcUnknown(false);
     setOfferDate(new Date().toISOString().slice(0, 10));
     setError('');
     setExpanded(true);
@@ -30,14 +32,22 @@ const ConvertToPpo = ({ offer, onConvert }) => {
 
   const submit = async (event) => {
     event.preventDefault();
-    if (!(Number(ctc) > 0)) {
-      setError('Enter the full-time CTC (₹ p.a.) for the PPO.');
+    if (!ctcUnknown && !(Number(ctc) > 0)) {
+      setError('Enter the full-time CTC (₹ p.a.) for the PPO, or mark it as not known yet.');
       return;
     }
     setBusy(true);
     setError('');
     try {
-      await onConvert(offer, { ctc: Number(ctc), role: role.trim() || null, offer_date: offerDate || null });
+      await onConvert(offer, {
+        // A CTC marked "not known yet" is sent as 0 rather than omitted: the backend treats 0
+        // as the explicit "known unknown" sentinel, which — unlike leaving the field blank —
+        // is guaranteed to stay out of every compensation average/median until it's updated.
+        ctc: ctcUnknown ? 0 : Number(ctc),
+        ctc_known: !ctcUnknown,
+        role: role.trim() || null,
+        offer_date: offerDate || null,
+      });
       setExpanded(false);
     } catch (err) {
       setError(err.response?.data?.message || err.message);
@@ -56,7 +66,16 @@ const ConvertToPpo = ({ offer, onConvert }) => {
       <div className="flex-row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <label>
           CTC (₹ p.a.)
-          <input type="number" min="0" step="any" value={ctc} onChange={(e) => setCtc(e.target.value)} required autoFocus />
+          <input
+            type="number"
+            min="0"
+            step="any"
+            value={ctc}
+            onChange={(e) => setCtc(e.target.value)}
+            disabled={ctcUnknown}
+            required={!ctcUnknown}
+            autoFocus
+          />
         </label>
         <label>
           Role
@@ -67,6 +86,14 @@ const ConvertToPpo = ({ offer, onConvert }) => {
           <input type="date" value={offerDate} onChange={(e) => setOfferDate(e.target.value)} />
         </label>
       </div>
+      <label className="checkbox-row">
+        <input
+          type="checkbox"
+          checked={ctcUnknown}
+          onChange={(e) => setCtcUnknown(e.target.checked)}
+        />
+        CTC not known yet — record the PPO without it
+      </label>
       {error && <div className="error-text">{error}</div>}
       <div className="flex-row" style={{ gap: 8 }}>
         <button type="submit" disabled={busy}>{busy ? 'Converting…' : 'Convert to PPO'}</button>
